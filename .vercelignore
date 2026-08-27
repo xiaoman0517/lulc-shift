@@ -1,0 +1,17 @@
+# 本地运行产物
+change_map.tif
+change_map.tif.aux.xml
+change_map.geojson
+change_map_analysis.png
+*.tmp
+
+# 本地工具/测试脚本（不参与 Vercel 部署）
+analyze_change_map.py
+test_api.py
+test_frontend.py
+
+# 日志与 Git
+server.log
+server.err
+.git
+.vercel

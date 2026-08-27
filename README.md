@@ -94,6 +94,35 @@ git push -u origin main
 
 > 提示：Vercel Hobby 计划函数最长 300s，处理大区域可能超时，前端已限制 BBOX ≤ 5°×5°。
 
+### 网络受限时：不经过 GitHub，直接部署到 Vercel
+
+Vercel **不强制要求 GitHub**，以下三种方式都可直接部署：
+
+**方式 A：Vercel CLI 直接上传（推荐）**
+
+```bash
+npm i -g vercel          # 需要 Node.js（本机已有）
+vercel login             # 浏览器授权，或用 vercel login --token <TOKEN>
+                         # token 在 https://vercel.com/account/tokens 生成
+vercel --prod
+```
+
+CLI 会把项目文件直接上传到 Vercel（不依赖 Git）。上传走 HTTPS，若网络不畅
+可给 CLI 配代理：`$env:HTTPS_PROXY='http://127.0.0.1:10809'` 后重试。
+
+**方式 B：换 Git 托管商中转**
+
+GitHub 连接不畅时，把仓库推到 GitLab / Bitbucket / Gitee，
+再在 Vercel **Import Git Repository** 中选择对应平台即可（Vercel 三者都支持）。
+
+**方式 C：网页 Drag & Drop**
+
+`vercel.com/new` 直接拖拽上传文件夹——但该方式主要支持静态/前端框架项目，
+**对 Python Serverless 函数支持有限，本项目不建议使用**。
+
+> 无论用哪种方式，本项目零环境变量、零密钥：数据来自 Planetary Computer 公开
+> STAC API（匿名签名），`io-lulc-9-class` 为公开数据，部署后即可直接使用。
+
 ## API 文档
 
 | 方法 | 路径 | 说明 |
