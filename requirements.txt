@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pystac-client>=0.8
+planetary-computer>=1.0
+rasterio>=1.3
+numpy>=1.24
+shapely>=2.0

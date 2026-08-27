@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>土地覆盖变化检测 · Land Cover Change Detection</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <h1>🌍 土地覆盖变化检测</h1>
+      <p class="sub">
+        数据源：Microsoft Planetary Computer <code>io-lulc-9-class</code>（10m 年度土地覆盖，2017~2022）。
+        在地图上框选范围并选择两个年份，即可得到变化栅格与矢量，支持卷帘对比前后时相。
+      </p>
+    </div>
+    <a class="github-link" href="https://github.com/" target="_blank" rel="noopener"
+       title="开源项目 GitHub 仓库">GitHub ↗</a>
+  </header>
+
+  <main>
+    <aside id="sidebar">
+      <section class="panel">
+        <h2>① 参数配置</h2>
+        <label class="field">监测范围 BBOX（WGS84 西,南,东,北）</label>
+        <div class="bbox-row">
+          <input id="bbox-input" type="text" value="113.90, 22.50, 114.00, 22.58" />
+        </div>
+        <div class="row2">
+          <div>
+            <label for="year-before">变化前</label>
+            <select id="year-before"></select>
+          </div>
+          <div>
+            <label for="year-after">变化后</label>
+            <select id="year-after"></select>
+          </div>
+        </div>
+        <p class="tip">提示：直接在右侧地图上用 ⬜ 工具框选范围，或手动输入坐标后点「应用」。</p>
+        <button id="submit-btn" class="btn primary" type="button">🚀 开始分析</button>
+        <button id="apply-bbox" class="btn ghost" type="button">应用 BBOX</button>
+      </section>
+
+      <section class="panel" id="progress-panel" hidden>
+        <h2>② 处理进度</h2>
+        <div class="progress-bar"><div id="progress-fill"></div></div>
+        <p id="progress-text">0%</p>
+        <div id="log-box"></div>
+      </section>
+
+      <section class="panel" id="result-panel" hidden>
+        <h2>③ 结果与预览</h2>
+        <div id="result-summary"></div>
+
+        <div class="download-row">
+          <a id="dl-tif" class="btn" href="#" download>⬇ GeoTIFF</a>
+          <a id="dl-geojson" class="btn btn-alt" href="#" download>⬇ GeoJSON</a>
+        </div>
+
+        <div class="layer-tip">
+          <p>📚 右侧地图已叠加图层，可在右上角「图层」面板切换显示：</p>
+          <ul>
+            <li><b>变化栅格</b>：瓦片渲染，0=无变化透明</li>
+            <li><b>变化矢量</b>：可点击查看属性</li>
+            <li><b>before / after 影像</b>：分类色带显示</li>
+          </ul>
+          <p>⇔ 点击地图左上角<b>「卷帘」</b>按钮可左右拖动，对比前后时相。</p>
+        </div>
+
+        <h3>📊 类别图例（影像）</h3>
+        <div id="class-legend" class="legend"></div>
+
+        <h3>📊 变化类型图例</h3>
+        <div id="change-legend" class="legend"></div>
+
+        <h3>Top 变化类型</h3>
+        <table id="transition-table">
+          <thead>
+            <tr><th>编码</th><th>变化类型</th><th>像素</th><th>面积(ha)</th><th>占比</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+    </aside>
+
+    <div id="map-pane-wrap">
+      <div id="map"></div>
+      <div id="swipe-handle" hidden></div>
+    </div>
+  </main>
+
+  <footer>
+    <p>开源项目 · MIT License · 部署于 Vercel · 数据 © Microsoft Planetary Computer / Impact Observatory</p>
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.vercel/
+.env
+node_modules/
+.DS_Store
+# 运行产物
+change_map.tif
+change_map.tif.aux.xml
+change_map.geojson
+change_map_analysis.png
+*.tmp
+# 测试产物
+test_output.*
+server.log
+server.err
