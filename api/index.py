@@ -30,10 +30,35 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response, JSONResponse
 from pydantic import BaseModel
 
-import engine
+# ---- 防御性导入：记录每个关键依赖的导入结果，避免整个函数崩溃 ----
+import_error = None
+_engine = None
+DEPENDENCY_CHECK = []
+
+for _mod in ["numpy", "rasterio", "pystac_client", "planetary_computer", "PIL", "shapely"]:
+    try:
+        __import__(_mod)
+        DEPENDENCY_CHECK.append({"module": _mod, "ok": True})
+    except Exception as exc:  # noqa: BLE001
+        DEPENDENCY_CHECK.append({"module": _mod, "ok": False, "error": f"{type(exc).__name__}: {exc}"})
+
+try:
+    import engine as _engine
+except Exception as exc:  # noqa: BLE001
+    import_error = f"{type(exc).__name__}: {exc}"
+
+
+def get_engine():
+    """安全获取 engine 模块；导入失败时抛出带细节的 HTTP 错误"""
+    if _engine is None:
+        raise HTTPException(
+            status_code=500,
+            detail=f"处理引擎导入失败（{import_error}）。依赖检查：{DEPENDENCY_CHECK}",
+        )
+    return _engine
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
 WORK_ROOT = os.path.join(tempfile.gettempdir(), "lulc_jobs")
@@ -67,8 +92,9 @@ def _run_job(job_id, req):
     workdir = os.path.join(WORK_ROOT, job_id)
     os.makedirs(workdir, exist_ok=True)
     try:
-        progress = engine.Progress(sink=lambda p: _job_from_progress(job, p))
-        result = engine.process_change(
+        eng = get_engine()
+        progress = eng.Progress(sink=lambda p: _job_from_progress(job, p))
+        result = eng.process_change(
             req.bbox, req.year_before, req.year_after, workdir, progress=progress
         )
         job["status"] = "done"
@@ -104,21 +130,39 @@ def static_file(name: str):
     return FileResponse(full)
 
 
+@app.get("/api/diag")
+def diag():
+    """诊断端点：不依赖 engine，用于排查线上函数启动问题"""
+    import site
+    return {
+        "ok": _engine is not None,
+        "import_error": import_error,
+        "dependencies": DEPENDENCY_CHECK,
+        "python": sys.version.split()[0],
+        "platform": sys.platform,
+        "cwd": os.getcwd(),
+        "site_packages": [p for p in sys.path if "site-packages" in p],
+        "temp": tempfile.gettempdir(),
+    }
+
+
 @app.get("/api/meta")
 def meta():
+    eng = get_engine()
     return {
-        "collection": engine.COLLECTION,
-        "stac_url": engine.STAC_URL,
-        "years": engine.YEARS,
-        "class_names": engine.CLASS_NAMES,
-        "nodata": engine.NODATA,
+        "collection": eng.COLLECTION,
+        "stac_url": eng.STAC_URL,
+        "years": eng.YEARS,
+        "class_names": eng.CLASS_NAMES,
+        "nodata": eng.NODATA,
     }
 
 
 @app.post("/api/jobs")
 def create_job(req: JobRequest):
-    if req.year_before not in engine.YEARS or req.year_after not in engine.YEARS:
-        raise HTTPException(status_code=400, detail=f"年份必须在 {engine.YEARS} 内")
+    eng = get_engine()
+    if req.year_before not in eng.YEARS or req.year_after not in eng.YEARS:
+        raise HTTPException(status_code=400, detail=f"年份必须在 {eng.YEARS} 内")
     if len(req.bbox) != 4:
         raise HTTPException(status_code=400, detail="bbox 必须是 [west, south, east, north]")
     w, s, e, n = req.bbox
@@ -196,7 +240,7 @@ def tile(job_id: str, layer: str, z: int, x: int, y: int):
     key = (job_id, layer, z, x, y)
     png = _TILE_CACHE.get(key)
     if png is None:
-        png = engine.render_tile(path, z, x, y, kind="change" if layer == "change" else "class")
+        png = get_engine().render_tile(path, z, x, y, kind="change" if layer == "change" else "class")
         if len(_TILE_CACHE) >= _TILE_CACHE_MAX:
             _TILE_CACHE.clear()
         _TILE_CACHE[key] = png

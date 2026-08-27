@@ -83,9 +83,11 @@
     drawnItems.clearLayers();
     drawnItems.addLayer(e.layer);
     updateFromLayer(e.layer);
+    hideMapTip();
   });
   map.on(L.Draw.Event.EDITED, (e) => {
     e.layers.eachLayer((l) => updateFromLayer(l));
+    hideMapTip();
   });
   map.on(L.Draw.Event.DELETED, () => {
     document.getElementById("bbox-input").value = "";
@@ -95,6 +97,23 @@
     const b = layer.getBounds();
     document.getElementById("bbox-input").value =
       `${b.getWest().toFixed(5)}, ${b.getSouth().toFixed(5)}, ${b.getEast().toFixed(5)}, ${b.getNorth().toFixed(5)}`;
+  }
+
+  function hideMapTip() {
+    const tip = document.getElementById("map-tip");
+    if (tip) tip.style.display = "none";
+  }
+
+  function setBtnLoading(loading) {
+    const btn = document.getElementById("submit-btn");
+    const label = btn.querySelector(".btn-label");
+    if (loading) {
+      btn.disabled = true;
+      if (label) label.textContent = "⏳ 处理中...";
+    } else {
+      btn.disabled = false;
+      if (label) label.textContent = "🚀 开始分析";
+    }
   }
 
   function parseBbox(text) {
@@ -126,8 +145,7 @@
     const year_after = Number(document.getElementById("year-after").value);
     if (year_before === year_after) return alert("请选择两个不同的年份");
 
-    const btn = document.getElementById("submit-btn");
-    btn.disabled = true;
+    setBtnLoading(true);
     showPanel("progress-panel");
     hidePanel("result-panel");
     setProgress(0, "提交任务...");
@@ -146,7 +164,7 @@
       poll();
     } catch (err) {
       showError(err.message);
-      btn.disabled = false;
+      setBtnLoading(false);
     }
   });
 
@@ -162,18 +180,18 @@
         clearInterval(pollTimer);
         pollTimer = null;
         renderResult(job.result);
-        document.getElementById("submit-btn").disabled = false;
+        setBtnLoading(false);
       } else if (job.status === "error") {
         clearInterval(pollTimer);
         pollTimer = null;
         showError(job.error || "处理失败");
-        document.getElementById("submit-btn").disabled = false;
+        setBtnLoading(false);
       }
     } catch (err) {
       clearInterval(pollTimer);
       pollTimer = null;
       showError(err.message);
-      document.getElementById("submit-btn").disabled = false;
+      setBtnLoading(false);
     }
   }
 
