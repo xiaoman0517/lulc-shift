@@ -33,31 +33,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response, JSONResponse
 from pydantic import BaseModel
 
-# ---- 防御性导入：记录每个关键依赖的导入结果，避免整个函数崩溃 ----
-import_error = None
+# ---- 懒加载 engine：模块加载阶段绝不导入重型科学计算库（避免函数启动崩溃）----
 _engine = None
-DEPENDENCY_CHECK = []
-
-for _mod in ["numpy", "rasterio", "pystac_client", "planetary_computer", "PIL", "shapely"]:
-    try:
-        __import__(_mod)
-        DEPENDENCY_CHECK.append({"module": _mod, "ok": True})
-    except Exception as exc:  # noqa: BLE001
-        DEPENDENCY_CHECK.append({"module": _mod, "ok": False, "error": f"{type(exc).__name__}: {exc}"})
-
-try:
-    import engine as _engine
-except Exception as exc:  # noqa: BLE001
-    import_error = f"{type(exc).__name__}: {exc}"
+_engine_error = None
 
 
 def get_engine():
-    """安全获取 engine 模块；导入失败时抛出带细节的 HTTP 错误"""
+    """首次调用时才导入 engine；失败时抛出带细节的 HTTP 错误"""
+    global _engine, _engine_error
+    if _engine is None and _engine_error is None:
+        try:
+            import importlib
+            _engine = importlib.import_module("engine")
+        except Exception as exc:  # noqa: BLE001
+            _engine_error = f"{type(exc).__name__}: {exc}"
     if _engine is None:
-        raise HTTPException(
-            status_code=500,
-            detail=f"处理引擎导入失败（{import_error}）。依赖检查：{DEPENDENCY_CHECK}",
-        )
+        raise HTTPException(status_code=500, detail=f"处理引擎加载失败：{_engine_error}")
     return _engine
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
@@ -132,16 +123,14 @@ def static_file(name: str):
 
 @app.get("/api/diag")
 def diag():
-    """诊断端点：不依赖 engine，用于排查线上函数启动问题"""
-    import site
+    """诊断端点：不加载任何重型依赖，用于排查线上函数启动问题"""
     return {
         "ok": _engine is not None,
-        "import_error": import_error,
-        "dependencies": DEPENDENCY_CHECK,
+        "engine_error": _engine_error,
+        "note": "重型依赖（numpy/rasterio 等）在首次任务请求时才加载，本端点不加载它们",
         "python": sys.version.split()[0],
         "platform": sys.platform,
         "cwd": os.getcwd(),
-        "site_packages": [p for p in sys.path if "site-packages" in p],
         "temp": tempfile.gettempdir(),
     }
 

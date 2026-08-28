@@ -17,23 +17,22 @@ import io
 import json
 import math
 import os
+import sys
 import time
 
-import numpy as np
-import rasterio
-from rasterio.features import shapes as rio_shapes
-from rasterio.warp import reproject, Resampling, transform_bounds
-from pystac_client import Client
-import planetary_computer as pc
-from PIL import Image
-from shapely.geometry import shape
+# 注意：第三方科学计算库（numpy / rasterio / shapely / PIL / pystac_client / planetary_computer）
+# 不在模块顶层导入，而是在各函数内部按需导入。
+# 原因：Serverless（如 Vercel）环境中，模块加载阶段导入重型二进制库可能导致函数
+# 启动崩溃（FUNCTION_INVOCATION_FAILED）。按需导入可保证首页与诊断接口始终可用。
 
-# 部分机器上 PROJ_LIB / GDAL_DATA 会被 PostgreSQL 等第三方软件改写到旧版本目录，
-# 导致 PROJ 报 "proj.db lacks DATABASE.LAYOUT.VERSION" 错误，这里强制使用 rasterio 自带目录。
-_rasterio_proj = os.path.join(os.path.dirname(rasterio.__file__), "proj_data")
-if os.path.isdir(_rasterio_proj):
-    os.environ["PROJ_DATA"] = _rasterio_proj
-    os.environ["PROJ_LIB"] = _rasterio_proj
+
+def _ensure_proj_env():
+    """确保 PROJ 使用 rasterio 自带的数据库（避免被 PostgreSQL 等第三方改写到旧版本目录）"""
+    import rasterio
+    _rp = os.path.join(os.path.dirname(rasterio.__file__), "proj_data")
+    if os.path.isdir(_rp):
+        os.environ["PROJ_DATA"] = _rp
+        os.environ["PROJ_LIB"] = _rp
 
 STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 COLLECTION = "io-lulc-9-class"
@@ -120,6 +119,10 @@ def _pick_item(items, bbox):
 
 def fetch_lulc_array(catalog, bbox, date_range, progress=None):
     """搜索 + 裁剪读取一个时相的分类影像，返回 (数组, transform, crs, profile, item_id)"""
+    import rasterio
+    from rasterio.warp import transform_bounds
+    import planetary_computer as pc
+
     search = catalog.search(
         collections=[COLLECTION],
         bbox=bbox,
@@ -152,6 +155,9 @@ def fetch_lulc_array(catalog, bbox, date_range, progress=None):
 
 def align_to_reference(arr, src_transform, src_crs, ref_arr, ref_transform, ref_crs):
     """把第二期影像重投影/重采样对齐到第一期的网格，保证逐像素可比（分类图必须用最近邻）"""
+    import numpy as np
+    from rasterio.warp import reproject, Resampling
+
     aligned = np.zeros_like(ref_arr)
     reproject(
         source=arr,
@@ -178,6 +184,8 @@ def summarize_transitions(before, after):
 
 def write_tif_with_metadata(change_code, profile, transform, crs, path):
     """写变化栅格，并把完整解码表写入 GeoTIFF 元数据（命名空间 CHANGE_DECODE）"""
+    import rasterio
+
     profile.update({
         "height": change_code.shape[0],
         "width": change_code.shape[1],
@@ -208,6 +216,8 @@ def write_tif_with_metadata(change_code, profile, transform, crs, path):
 
 def write_class_tif(arr, profile, transform, crs, path):
     """写一个时相的分类栅格（uint8，nodata=11），供前端瓦片叠加显示"""
+    import rasterio
+
     profile.update({
         "height": arr.shape[0],
         "width": arr.shape[1],
@@ -232,6 +242,13 @@ def render_tile(tif_path, z, x, y, kind="class", tile_size=256):
       - "change": 变化栅格，用 Tab20 调色板渲染，0=无变化 透明
     返回 PNG 字节；范围外返回 256x256 全透明 PNG。
     """
+    import numpy as np
+    import rasterio
+    from rasterio.warp import transform_bounds
+    from PIL import Image
+
+    _ensure_proj_env()
+
     n = 2 ** z
     if not (0 <= int(x) < n and 0 <= int(y) < n):
         return _empty_png(tile_size)
@@ -276,6 +293,9 @@ def render_tile(tif_path, z, x, y, kind="class", tile_size=256):
 
 
 def _empty_png(tile_size=256):
+    import numpy as np
+    from PIL import Image
+
     img = np.zeros((tile_size, tile_size, 4), dtype=np.uint8)
     out = io.BytesIO()
     Image.fromarray(img, "RGBA").save(out, format="PNG")
@@ -284,6 +304,9 @@ def _empty_png(tile_size=256):
 
 def write_geojson(change_code, transform, crs, path):
     """把变化栅格转矢量 GeoJSON，属性表带 from/to/transition/面积（UTM 米制）"""
+    from rasterio.features import shapes as rio_shapes
+    from shapely.geometry import shape
+
     features = []
     for geom, value in rio_shapes(change_code.astype("int16"), transform=transform):
         code = int(value)
@@ -321,6 +344,10 @@ def write_geojson(change_code, transform, crs, path):
 
 def process_change(bbox, year_before, year_after, out_dir, progress=None):
     """完整处理流程：拉取两个时相 -> 对齐 -> 统计 -> 输出 tif(含解码元数据) + geojson"""
+    import numpy as np
+    from pystac_client import Client
+
+    _ensure_proj_env()
 
     def report(p, m):
         if progress:
