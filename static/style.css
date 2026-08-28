@@ -209,6 +209,8 @@ tbody tr:hover { background: #f6fbfa; }
   border-left: 1px solid rgba(0,0,0,.35); border-right: 1px solid rgba(0,0,0,.35);
   cursor: ew-resize; z-index: 1000;
   box-shadow: 0 0 8px rgba(0,0,0,.4);
+  /* 让点击穿透到下层按钮（拖动由 document 级 mousemove 处理，无需竖线接收事件） */
+  pointer-events: none;
 }
 #swipe-handle::after {
   content: "⇔";
@@ -216,6 +218,7 @@ tbody tr:hover { background: #f6fbfa; }
   background: var(--brand-deep); color: #fff; font-size: 12px;
   width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
   border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,.3);
+  pointer-events: none;
 }
 
 .swipe-toggle {

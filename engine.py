@@ -27,12 +27,15 @@ import time
 
 
 def _ensure_proj_env():
-    """确保 PROJ 使用 rasterio 自带的数据库（避免被 PostgreSQL 等第三方改写到旧版本目录）"""
-    import rasterio
-    _rp = os.path.join(os.path.dirname(rasterio.__file__), "proj_data")
-    if os.path.isdir(_rp):
-        os.environ["PROJ_DATA"] = _rp
-        os.environ["PROJ_LIB"] = _rp
+    """确保 PROJ 使用 rasterio 自带的数据库（避免被 PostgreSQL 等第三方改写到旧版本目录）。
+    用 find_spec 定位 rasterio 而不实际导入，保证可在导入 rasterio 之前设置环境变量。"""
+    import importlib.util
+    _spec = importlib.util.find_spec("rasterio")
+    if _spec and _spec.origin:
+        _rp = os.path.join(os.path.dirname(_spec.origin), "proj_data")
+        if os.path.isdir(_rp):
+            os.environ["PROJ_DATA"] = _rp
+            os.environ["PROJ_LIB"] = _rp
 
 STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 COLLECTION = "io-lulc-9-class"
@@ -242,12 +245,12 @@ def render_tile(tif_path, z, x, y, kind="class", tile_size=256):
       - "change": 变化栅格，用 Tab20 调色板渲染，0=无变化 透明
     返回 PNG 字节；范围外返回 256x256 全透明 PNG。
     """
+    _ensure_proj_env()
+
     import numpy as np
     import rasterio
-    from rasterio.warp import transform_bounds
+    from rasterio.warp import transform_bounds, Resampling
     from PIL import Image
-
-    _ensure_proj_env()
 
     n = 2 ** z
     if not (0 <= int(x) < n and 0 <= int(y) < n):

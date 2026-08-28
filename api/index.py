@@ -33,6 +33,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response, JSONResponse
 from pydantic import BaseModel
 
+# ---- 预置 PROJ 数据库路径（在导入 rasterio 之前执行，避免被系统 PROJ_LIB 污染）----
+# 用 find_spec 定位但不导入 rasterio，保证函数启动保持轻量
+try:
+    import importlib.util
+    _rasterio_spec = importlib.util.find_spec("rasterio")
+    if _rasterio_spec and _rasterio_spec.origin:
+        _proj_dir = os.path.join(os.path.dirname(_rasterio_spec.origin), "proj_data")
+        if os.path.isdir(_proj_dir):
+            os.environ["PROJ_DATA"] = _proj_dir
+            os.environ["PROJ_LIB"] = _proj_dir
+except Exception:  # noqa: BLE001
+    pass
+
 # ---- 懒加载 engine：模块加载阶段绝不导入重型科学计算库（避免函数启动崩溃）----
 _engine = None
 _engine_error = None

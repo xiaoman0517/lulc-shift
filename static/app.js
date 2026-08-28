@@ -281,6 +281,8 @@
         if (window.layerControl) {
           window.layerControl.addOverlay(layers.geojson, "🔺 变化矢量（点击查看属性）");
         }
+        // 自动显示变化矢量，方便立即查看
+        map.addLayer(layers.geojson);
         renderChangeLegend(palette, data.features.length);
       })
       .catch(() => console.warn("变化矢量加载失败"));
@@ -324,7 +326,12 @@
     const btn = document.getElementById("swipe-toggle-btn");
     btn.classList.toggle("active", swipeEnabled);
     if (swipeEnabled) {
-      if (!layers.after) return alert("请先完成一次分析");
+      if (!layers.after) {
+        // 尚无结果图层：回滚状态，避免按钮卡在开启态
+        btn.classList.remove("active");
+        swipeEnabled = false;
+        return alert("请先完成一次分析，再进行卷帘对比");
+      }
       if (!map.hasLayer(layers.after)) {
         map.addLayer(layers.after);
         afterAutoAdded = true;
