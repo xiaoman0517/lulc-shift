@@ -83,17 +83,30 @@ body {
 /* ---------- 表单与按钮 ---------- */
 .field-group { margin-bottom: 14px; }
 .field-group label { display: block; font-size: 12.5px; color: var(--ink-2); margin-bottom: 6px; font-weight: 500; }
-.bbox-input-row { display: flex; gap: 8px; }
-#bbox-input {
-  flex: 1; padding: 9px 12px;
-  border: 1.5px solid var(--line); border-radius: 10px;
-  font-size: 13px; font-family: ui-monospace, Consolas, monospace;
-  transition: border-color .15s, box-shadow .15s;
-  background: #fbfcfd; color: var(--ink);
+.bbox-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
 }
-#bbox-input:focus {
-  outline: none; border-color: var(--brand-1);
-  box-shadow: 0 0 0 3px rgba(14,159,140,.15); background: #fff;
+.bbox-field { display: flex; flex-direction: column; gap: 4px; }
+.bbox-field label { font-size: 11px; color: var(--ink-2); margin: 0; }
+.bbox-field input {
+  width: 100%;
+  padding: 8px 6px;
+  border: 1.5px solid var(--line);
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-family: ui-monospace, Consolas, monospace;
+  background: #fbfcfd;
+  color: var(--ink);
+  text-align: center;
+  transition: border-color .15s, box-shadow .15s;
+}
+.bbox-field input:focus {
+  outline: none;
+  border-color: var(--brand-1);
+  box-shadow: 0 0 0 3px rgba(14,159,140,.15);
+  background: #fff;
 }
 .hint { font-size: 11.5px; color: #8b9aa3; margin: 7px 0 0; line-height: 1.6; }
 

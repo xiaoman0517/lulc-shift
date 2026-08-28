@@ -139,7 +139,7 @@ def fetch_lulc_array(catalog, bbox, date_range, progress=None):
     asset_href = item.assets["data"].href
 
     if progress:
-        progress.update(progress.percent, f"读取影像 {item.id} ...")
+        progress.update(progress.percent, f"读取分类影像 {item.id} ...")
 
     with rasterio.open(asset_href) as src:
         # io-lulc 的 COG 是 UTM 投影（米），bbox 是经纬度，先转换到栅格坐标系再裁剪
@@ -370,12 +370,12 @@ def process_change(bbox, year_before, year_after, out_dir, progress=None):
     report(10, f"拉取时相1（{year_before} 年）...")
     before_arr, before_transform, before_crs, profile, before_item = fetch_lulc_array(
         catalog, bbox, before_range, progress=progress)
-    report(35, f"使用影像 {before_item}")
+    report(35, f"使用分类影像 {before_item}")
 
     report(40, f"拉取时相2（{year_after} 年）...")
     after_arr, after_transform, after_crs, _, after_item = fetch_lulc_array(
         catalog, bbox, after_range, progress=progress)
-    report(60, f"使用影像 {after_item}")
+    report(60, f"使用分类影像 {after_item}")
 
     report(65, "对齐两期影像网格 ...")
     after_aligned = align_to_reference(

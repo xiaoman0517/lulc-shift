@@ -80,23 +80,39 @@
   map.addControl(drawControl);
 
   map.on(L.Draw.Event.CREATED, (e) => {
+    // 保证同一时刻只有一个选区：新矩形替换旧矩形
     drawnItems.clearLayers();
     drawnItems.addLayer(e.layer);
-    updateFromLayer(e.layer);
+    setBboxInputs(e.layer);
     hideMapTip();
   });
   map.on(L.Draw.Event.EDITED, (e) => {
-    e.layers.eachLayer((l) => updateFromLayer(l));
+    e.layers.eachLayer((l) => setBboxInputs(l));
     hideMapTip();
   });
   map.on(L.Draw.Event.DELETED, () => {
-    document.getElementById("bbox-input").value = "";
+    ["bbox-north", "bbox-south", "bbox-west", "bbox-east"].forEach((id) => {
+      document.getElementById(id).value = "";
+    });
   });
 
-  function updateFromLayer(layer) {
+  function setBboxInputs(layer) {
     const b = layer.getBounds();
-    document.getElementById("bbox-input").value =
-      `${b.getWest().toFixed(5)}, ${b.getSouth().toFixed(5)}, ${b.getEast().toFixed(5)}, ${b.getNorth().toFixed(5)}`;
+    document.getElementById("bbox-west").value = b.getWest().toFixed(5);
+    document.getElementById("bbox-south").value = b.getSouth().toFixed(5);
+    document.getElementById("bbox-east").value = b.getEast().toFixed(5);
+    document.getElementById("bbox-north").value = b.getNorth().toFixed(5);
+  }
+
+  function readBbox() {
+    const w = parseFloat(document.getElementById("bbox-west").value);
+    const s = parseFloat(document.getElementById("bbox-south").value);
+    const e = parseFloat(document.getElementById("bbox-east").value);
+    const n = parseFloat(document.getElementById("bbox-north").value);
+    if (![w, s, e, n].every((v) => isFinite(v))) return null;
+    if (!(-180 <= w && w < e && e <= 180 && -90 <= s && s < n && n <= 90)) return null;
+    if (e - w > 5 || n - s > 5) return null;
+    return [w, s, e, n];
   }
 
   function hideMapTip() {
@@ -116,31 +132,13 @@
     }
   }
 
-  function parseBbox(text) {
-    const parts = String(text).split(/[,，\s]+/).filter(Boolean).map(Number);
-    if (parts.length !== 4 || parts.some((x) => !isFinite(x))) return null;
-    const [w, s, e, n] = parts;
-    if (!(-180 <= w && w < e && e <= 180 && -90 <= s && s < n && n <= 90)) return null;
-    if (e - w > 5 || n - s > 5) return null;
-    return parts;
-  }
-
-  function applyBbox() {
-    const v = parseBbox(document.getElementById("bbox-input").value);
-    if (!v) return alert("BBOX 格式应为：西经, 南纬, 东经, 北纬（且不超过 5°×5°）");
-    drawnItems.clearLayers();
-    drawnItems.addLayer(L.rectangle(L.latLngBounds([v[1], v[3]], [v[3], v[0]])));
-    map.fitBounds(drawnItems.getBounds().pad(0.3));
-  }
-  document.getElementById("apply-bbox").addEventListener("click", applyBbox);
-
   // ---- 任务流程 ----
   let pollTimer = null;
   let currentJobId = null;
 
   document.getElementById("submit-btn").addEventListener("click", async () => {
-    const bbox = parseBbox(document.getElementById("bbox-input").value);
-    if (!bbox) return alert("BBOX 格式非法，或超出 ±5°×±5° 限制");
+    const bbox = readBbox();
+    if (!bbox) return alert("监测范围非法：请填写北/南/西/东四个数值（范围不超过 5°×5°），或在地图上绘制矩形");
     const year_before = Number(document.getElementById("year-before").value);
     const year_after = Number(document.getElementById("year-after").value);
     if (year_before === year_after) return alert("请选择两个不同的年份");
@@ -201,7 +199,7 @@
 
   function renderResult(result) {
     document.getElementById("result-summary").innerHTML =
-      `<p>影像：<b>${result.before_item}</b> → <b>${result.after_item}</b>（${result.width}×${result.height} 像素，` +
+      `<p>分类影像：<b>${result.before_item}</b> → <b>${result.after_item}</b>（${result.width}×${result.height} 像素，` +
       `${result.pixel_area_m2} m²/像素，CRS ${result.crs}）</p>` +
       `<p>变化像素 <b>${result.changed_pixels.toLocaleString()}</b>（占 ${(result.change_percent * 100).toFixed(2)}%）` +
       `，约 <b>${(result.changed_pixels * result.pixel_area_m2 / 1e4).toFixed(1)}</b> 公顷。</p>`;
@@ -241,8 +239,8 @@
     });
 
     const overlayMaps = {
-      "🖼 变化前影像（before）": layers.before,
-      "🖼 变化后影像（after）": layers.after,
+      "🖼 变化前分类（before）": layers.before,
+      "🖼 变化后分类（after）": layers.after,
       "🎨 变化栅格": layers.change,
     };
     const baseMaps = { "OpenStreetMap": osm, "卫星影像": esri };
@@ -332,9 +330,15 @@
         swipeEnabled = false;
         return alert("请先完成一次分析，再进行卷帘对比");
       }
+      // 变化前/后分类都保持显示（卷帘左右两侧分别显示 before / after）
+      if (!map.hasLayer(layers.before)) map.addLayer(layers.before);
       if (!map.hasLayer(layers.after)) {
         map.addLayer(layers.after);
         afterAutoAdded = true;
+      }
+      // 自动把检测区域缩放居中到地图中央，留出边距避免与控件重叠
+      if (drawnItems.getLayers().length) {
+        map.fitBounds(drawnItems.getBounds().pad(0.25), { maxZoom: 16 });
       }
       handle.hidden = false;
       updateSwipe(null);
@@ -351,8 +355,12 @@
   }
 
   function onSwipeMove(e) {
-    const rect = map.getContainer().getBoundingClientRect();
-    updateSwipe(e.clientX - rect.left);
+    // 卷帘只在鼠标位于地图（分类图）区域时生效；离开地图范围则保持当前卷帘位置
+    const container = map.getContainer();
+    const rect = container.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    if (x < 0 || x > rect.width || e.clientY < rect.top || e.clientY > rect.bottom) return;
+    updateSwipe(x);
   }
 
   function updateSwipe(x) {

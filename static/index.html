@@ -39,13 +39,26 @@
         </div>
 
         <div class="field-group">
-          <label for="bbox-input">监测范围 · BBOX（西,南,东,北）</label>
-          <div class="bbox-input-row">
-            <input id="bbox-input" type="text" value="113.90, 22.50, 114.00, 22.58"
-                   spellcheck="false" autocomplete="off" />
-            <button id="apply-bbox" class="btn btn-ghost" type="button" title="应用输入的 BBOX">应用</button>
+          <label>监测范围（度，WGS84）</label>
+          <div class="bbox-grid">
+            <div class="bbox-field">
+              <label for="bbox-north">北 N</label>
+              <input id="bbox-north" type="text" value="22.58000" spellcheck="false" autocomplete="off" />
+            </div>
+            <div class="bbox-field">
+              <label for="bbox-south">南 S</label>
+              <input id="bbox-south" type="text" value="22.50000" spellcheck="false" autocomplete="off" />
+            </div>
+            <div class="bbox-field">
+              <label for="bbox-west">西 W</label>
+              <input id="bbox-west" type="text" value="113.90000" spellcheck="false" autocomplete="off" />
+            </div>
+            <div class="bbox-field">
+              <label for="bbox-east">东 E</label>
+              <input id="bbox-east" type="text" value="114.00000" spellcheck="false" autocomplete="off" />
+            </div>
           </div>
-          <p class="hint">也可以直接在右侧地图上拖拽绘制一个矩形。</p>
+          <p class="hint">在右侧地图上拖拽绘制一个矩形，四个数值会自动更新。</p>
         </div>
 
         <div class="field-group years-row">
@@ -93,14 +106,14 @@
         <div class="tip-card">
           <p><b>操作提示</b></p>
           <ul>
-            <li>右上角「图层」面板：切换 before / after / 变化栅格 / 变化矢量</li>
-            <li>左上角「⇔ 卷帘」：拖动竖线对比前后时相</li>
+            <li>右上角「图层」面板：切换 before/after 分类、变化栅格、变化矢量</li>
+            <li>左上角「⇔ 卷帘」：拖动竖线对比前后时相分类</li>
             <li>点击矢量多边形可查看转移属性</li>
           </ul>
         </div>
 
         <div class="legend-block">
-          <h3>影像类别</h3>
+          <h3>土地覆盖类别</h3>
           <div id="class-legend" class="legend"></div>
         </div>
 
