@@ -360,6 +360,9 @@ def process_change(bbox, year_before, year_after, out_dir, progress=None):
         raise ValueError(f"年份必须在 {YEARS[0]}~{YEARS[-1]} 之间")
     if len(bbox) != 4 or not all(isinstance(v, (int, float)) for v in bbox):
         raise ValueError("bbox 必须是 [west, south, east, north] 四个数值")
+    _w, _s, _e, _n = bbox
+    if _e - _w > 0.5 or _n - _s > 0.5:
+        raise ValueError("BBOX 单边超过 0.5°（约 55km）上限，请缩小监测范围")
 
     report(3, "连接 Planetary Computer STAC ...")
     catalog = Client.open(STAC_URL)

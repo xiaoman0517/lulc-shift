@@ -170,10 +170,10 @@ def create_job(req: JobRequest):
     w, s, e, n = req.bbox
     if not (-180 <= w < e <= 180 and -90 <= s < n <= 90):
         raise HTTPException(status_code=400, detail="bbox 范围非法")
-    if e - w > 5 or n - s > 5:
+    if e - w > 0.5 or n - s > 0.5:
         raise HTTPException(
             status_code=400,
-            detail="BBOX 过大（最大 5°×5°），过大的区域会超出单瓦片范围并导致处理时间过长",
+            detail="BBOX 过大（单边最大 0.5°，约 55km），请缩小监测范围",
         )
 
     job_id = uuid.uuid4().hex[:12]

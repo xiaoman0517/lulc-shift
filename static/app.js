@@ -23,6 +23,10 @@
     "#c49c94", "#f7b6d2", "#c7c7c7", "#dbdb8d", "#9edae5",
   ];
 
+  // 监测范围上限（单边度数）。io-lulc 为 10m 分辨率：
+  // 0.5° ≈ 55km ≈ 5500 像素，单边 5500×5500 ≈ 3000 万像素已接近内存/耗时安全边界。
+  const MAX_BBOX_DEG = 0.5;
+
   // ---- 元信息 ----
   let YEARS = [];
   fetch(API.meta)
@@ -92,7 +96,11 @@
       btn.id = "rect-tool-btn";
       btn.title = "两点绘制矩形：依次点击两个对角点即可生成";
       btn.innerHTML = "⬜";
-      L.DomEvent.on(btn, "click", toggleRectMode);
+      // 阻止按钮点击事件冒泡到地图，避免被当成第一个角点
+      L.DomEvent.on(btn, "click", (e) => {
+        L.DomEvent.stop(e);
+        toggleRectMode();
+      });
       return btn;
     },
   });
@@ -143,6 +151,11 @@
       // 过滤零宽度/零高度的无效点击
       if (b.getNorth() - b.getSouth() < 0.0001 || b.getEast() - b.getWest() < 0.0001) {
         setMapTip("区域过小，请重新点击两个角点");
+        return;
+      }
+      // 超过处理范围上限时拒绝生成，提示重新绘制
+      if (b.getEast() - b.getWest() > MAX_BBOX_DEG || b.getNorth() - b.getSouth() > MAX_BBOX_DEG) {
+        setMapTip(`范围过大：单边需不超过 ${MAX_BBOX_DEG}°，请重新绘制`);
         return;
       }
       // 同一时刻只保留一个矩形：新矩形替换旧矩形
@@ -213,7 +226,7 @@
     const n = parseFloat(document.getElementById("bbox-north").value);
     if (![w, s, e, n].every((v) => isFinite(v))) return null;
     if (!(-180 <= w && w < e && e <= 180 && -90 <= s && s < n && n <= 90)) return null;
-    if (e - w > 5 || n - s > 5) return null;
+    if (e - w > MAX_BBOX_DEG || n - s > MAX_BBOX_DEG) return null;
     return [w, s, e, n];
   }
 
@@ -240,7 +253,7 @@
 
   document.getElementById("submit-btn").addEventListener("click", async () => {
     const bbox = readBbox();
-    if (!bbox) return alert("监测范围非法：请填写北/南/西/东四个数值（范围不超过 5°×5°），或在地图上绘制矩形");
+    if (!bbox) return alert(`监测范围非法：请填写北/南/西/东四个数值（单边不超过 ${MAX_BBOX_DEG}°），或在地图上两点绘制矩形`);
     const year_before = Number(document.getElementById("year-before").value);
     const year_after = Number(document.getElementById("year-after").value);
     if (year_before === year_after) return alert("请选择两个不同的年份");
@@ -415,7 +428,10 @@
       btn.id = "swipe-toggle-btn";
       btn.title = "卷帘对比 before/after（点击开启/关闭，拖动竖线）";
       btn.innerHTML = "⇔ 卷帘";
-      L.DomEvent.on(btn, "click", toggleSwipe);
+      L.DomEvent.on(btn, "click", (e) => {
+        L.DomEvent.stop(e);
+        toggleSwipe();
+      });
       return btn;
     },
   });
