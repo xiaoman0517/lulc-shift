@@ -96,6 +96,25 @@
     });
   });
 
+  // 手动编辑 BBOX 输入框后（失焦/回车）自动把矩形画到地图上，无需“应用”按钮
+  ["bbox-west", "bbox-south", "bbox-east", "bbox-north"].forEach((id) => {
+    document.getElementById(id).addEventListener("change", syncRectFromInputs);
+  });
+
+  function syncRectFromInputs() {
+    const bbox = readBbox();
+    if (!bbox) return;
+    // 若与当前矩形一致则跳过，避免地图绘制回填输入框时造成循环
+    if (drawnItems.getLayers().length) {
+      const b = drawnItems.getBounds();
+      const cur = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+      if (cur.every((v, i) => Math.abs(v - bbox[i]) < 1e-4)) return;
+    }
+    drawnItems.clearLayers();
+    drawnItems.addLayer(L.rectangle(L.latLngBounds([bbox[1], bbox[3]], [bbox[3], bbox[0]])));
+    hideMapTip();
+  }
+
   function setBboxInputs(layer) {
     const b = layer.getBounds();
     document.getElementById("bbox-west").value = b.getWest().toFixed(5);
@@ -199,7 +218,7 @@
 
   function renderResult(result) {
     document.getElementById("result-summary").innerHTML =
-      `<p>分类影像：<b>${result.before_item}</b> → <b>${result.after_item}</b>（${result.width}×${result.height} 像素，` +
+      `<p>对比分类数据：<b>${result.before_item}</b> → <b>${result.after_item}</b>（${result.width}×${result.height} 像素，` +
       `${result.pixel_area_m2} m²/像素，CRS ${result.crs}）</p>` +
       `<p>变化像素 <b>${result.changed_pixels.toLocaleString()}</b>（占 ${(result.change_percent * 100).toFixed(2)}%）` +
       `，约 <b>${(result.changed_pixels * result.pixel_area_m2 / 1e4).toFixed(1)}</b> 公顷。</p>`;
@@ -319,6 +338,8 @@
   });
   map.addControl(new SwipeToggle());
 
+  let changeWasVisible = false;
+
   function toggleSwipe() {
     swipeEnabled = !swipeEnabled;
     const btn = document.getElementById("swipe-toggle-btn");
@@ -336,15 +357,30 @@
         map.addLayer(layers.after);
         afterAutoAdded = true;
       }
-      // 自动把检测区域缩放居中到地图中央，留出边距避免与控件重叠
+      // 卷帘对比时临时隐藏变化栅格，让右侧显示干净的变化前分类；关闭后恢复
+      if (layers.change && map.hasLayer(layers.change)) {
+        changeWasVisible = true;
+        map.removeLayer(layers.change);
+      }
+      // 自动把监测范围缩放到地图中央，四周留白，避免与工具栏/图层面板重叠
       if (drawnItems.getLayers().length) {
-        map.fitBounds(drawnItems.getBounds().pad(0.25), { maxZoom: 16 });
+        map.fitBounds(drawnItems.getBounds(), {
+          paddingTopLeft: [70, 80],
+          paddingBottomRight: [70, 70],
+          maxZoom: 16,
+        });
       }
       handle.hidden = false;
       updateSwipe(null);
       document.addEventListener("mousemove", onSwipeMove);
+      // 等 fitBounds 动画结束后校正一次竖线位置
+      setTimeout(() => updateSwipe(null), 300);
     } else {
       document.removeEventListener("mousemove", onSwipeMove);
+      if (changeWasVisible && layers.change) {
+        map.addLayer(layers.change);
+      }
+      changeWasVisible = false;
       if (afterAutoAdded && layers.after) {
         map.removeLayer(layers.after);
         afterAutoAdded = false;
@@ -363,10 +399,29 @@
     updateSwipe(x);
   }
 
+  function getSwipeXRange() {
+    // 卷帘只在监测范围（分类图）内有效：竖线活动区间限制在矩形投影到地图上的像素范围
+    const width = map.getContainer().clientWidth;
+    if (drawnItems.getLayers().length) {
+      const b = drawnItems.getBounds();
+      if (b.isValid()) {
+        const p1 = map.latLngToContainerPoint(b.getNorthWest());
+        const p2 = map.latLngToContainerPoint(b.getSouthEast());
+        const left = Math.max(0, Math.min(p1.x, p2.x));
+        const right = Math.min(width, Math.max(p1.x, p2.x));
+        if (right - left > 8) return { left, right };
+      }
+    }
+    return { left: 0, right: width };
+  }
+
   function updateSwipe(x) {
     const paneEl = map.getPane("afterPane");
     const width = map.getContainer().clientWidth;
-    const pos = x == null ? Math.floor(width / 2) : Math.max(0, Math.min(width, x));
+    const range = getSwipeXRange();
+    const pos = x == null
+      ? Math.floor((range.left + range.right) / 2)
+      : Math.max(range.left, Math.min(range.right, x));
     handle.style.left = `${pos}px`;
     const clip = `inset(0 ${width - pos}px 0 0)`;
     paneEl.style.clipPath = clip;
