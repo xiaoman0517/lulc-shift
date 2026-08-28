@@ -244,6 +244,16 @@ tbody tr:hover { background: #f6fbfa; }
 .swipe-toggle:hover { background: #f0f7f6; }
 .swipe-toggle.active { background: var(--brand-deep); color: #fff; }
 
+.rect-tool {
+  font-size: 15px; line-height: 30px; text-align: center;
+  background: #fff; cursor: pointer; user-select: none;
+  border-radius: 8px; border: 1px solid rgba(0,0,0,.15);
+  box-shadow: var(--shadow-sm);
+  transition: background .15s, color .15s;
+}
+.rect-tool:hover { background: #f0f7f6; }
+.rect-tool.active { background: var(--brand-deep); color: #fff; }
+
 /* Leaflet 控件美化 */
 .leaflet-control-layers {
   border-radius: 10px !important;

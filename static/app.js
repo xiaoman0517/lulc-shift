@@ -73,11 +73,94 @@
 
   const drawnItems = new L.FeatureGroup();
   map.addLayer(drawnItems);
+  // 禁用拖拽式画矩形（改为自定义"点击两点"绘制），仅保留编辑/删除能力
   const drawControl = new L.Control.Draw({
-    draw: { rectangle: true, polygon: false, circle: false, marker: false, polyline: false, circlemarker: false },
+    draw: { rectangle: false, polygon: false, circle: false, marker: false, polyline: false, circlemarker: false },
     edit: { featureGroup: drawnItems, remove: true },
   });
   map.addControl(drawControl);
+
+  // ---- 自定义"两点点击"绘制矩形 ----
+  let rectMode = false;
+  let rectStart = null;
+  let rectPreview = null;
+
+  const RectTool = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd() {
+      const btn = L.DomUtil.create("div", "rect-tool leaflet-bar");
+      btn.id = "rect-tool-btn";
+      btn.title = "两点绘制矩形：依次点击两个对角点即可生成";
+      btn.innerHTML = "⬜";
+      L.DomEvent.on(btn, "click", toggleRectMode);
+      return btn;
+    },
+  });
+  map.addControl(new RectTool());
+
+  function setMapTip(text) {
+    const tip = document.getElementById("map-tip");
+    if (!tip) return;
+    tip.textContent = text;
+    tip.style.display = "";
+  }
+
+  function toggleRectMode() {
+    rectMode = !rectMode;
+    const btn = document.getElementById("rect-tool-btn");
+    btn.classList.toggle("active", rectMode);
+    map.getContainer().style.cursor = rectMode ? "crosshair" : "";
+    if (!rectMode) {
+      // 退出模式：清理预览与临时起点
+      rectStart = null;
+      if (rectPreview) {
+        map.removeLayer(rectPreview);
+        rectPreview = null;
+      }
+      if (!drawnItems.getLayers().length) setMapTip("⬜ 点击左侧工具栏绘制监测范围");
+      else hideMapTip();
+    } else {
+      setMapTip("点击第一个角点（起点）");
+    }
+  }
+
+  map.on("click", (e) => {
+    if (!rectMode) return;
+    if (!rectStart) {
+      rectStart = e.latlng;
+      rectPreview = L.rectangle(L.latLngBounds(rectStart, rectStart), {
+        color: "#f08a4b", weight: 2, dashArray: "4,4", fillOpacity: 0.05,
+      });
+      rectPreview.addTo(map);
+      setMapTip("再点击第二个对角点完成矩形");
+    } else {
+      const b = L.latLngBounds(rectStart, e.latlng);
+      rectStart = null;
+      if (rectPreview) {
+        map.removeLayer(rectPreview);
+        rectPreview = null;
+      }
+      // 过滤零宽度/零高度的无效点击
+      if (b.getNorth() - b.getSouth() < 0.0001 || b.getEast() - b.getWest() < 0.0001) {
+        setMapTip("区域过小，请重新点击两个角点");
+        return;
+      }
+      // 同一时刻只保留一个矩形：新矩形替换旧矩形
+      drawnItems.clearLayers();
+      const rect = L.rectangle(b, { color: "#0e9f8c", weight: 2, fillOpacity: 0.08 });
+      drawnItems.addLayer(rect);
+      // 同步更新检测范围数值
+      setBboxInputs(rect);
+      hideMapTip();
+      toggleRectMode(); // 完成一次绘制后自动退出绘制模式
+    }
+  });
+
+  map.on("mousemove", (e) => {
+    if (rectMode && rectStart && rectPreview) {
+      rectPreview.setBounds(L.latLngBounds(rectStart, e.latlng));
+    }
+  });
 
   map.on(L.Draw.Event.CREATED, (e) => {
     // 保证同一时刻只有一个选区：新矩形替换旧矩形
