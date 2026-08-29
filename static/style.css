@@ -207,6 +207,17 @@ tbody tr:hover { background: #f6fbfa; }
 /* ---------- 地图 ---------- */
 .map-wrap { flex: 1; position: relative; min-width: 0; }
 #map { position: absolute; inset: 0; background: #dbe4ea; }
+#map-top {
+  position: absolute; inset: 0;
+  z-index: 500;
+  background: transparent !important;
+  pointer-events: none;   /* 卷帘未开启时交互穿透到底层地图 */
+  clip-path: inset(0 100% 0 0);
+  -webkit-clip-path: inset(0 100% 0 0);
+}
+#map-top.swiping {
+  pointer-events: auto;   /* 卷帘开启后左侧区域可交互 */
+}
 .map-tip {
   position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
   z-index: 900;

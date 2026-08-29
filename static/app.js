@@ -74,23 +74,29 @@
   );
   osm.addTo(map);
 
-  // before 放默认 overlayPane；after 放独立 pane 以便卷帘裁剪
-  map.createPane("afterPane");
-  map.getPane("afterPane").style.zIndex = 500;
+  // 上层地图（twin-map）：只承载 after 分类图层，覆盖在底层 map 之上用于卷帘
+  const mapTop = L.map("map-top", {
+    zoomControl: false,
+    attributionControl: false,
+    keyboard: false,
+  }).setView([22.54, 113.95], 12);
 
-  // Leaflet 的 pane 默认没有宽高，clip-path 会失效；这里显式给 afterPane 设置
-  // 与地图容器一致的像素尺寸，clip-path 才能按"容器像素"正确裁剪。
-  function sizeAfterPane() {
-    const pane = map.getPane("afterPane");
-    if (!pane) return;
-    const s = map.getSize();
-    pane.style.left = "0px";
-    pane.style.top = "0px";
-    pane.style.width = s.x + "px";
-    pane.style.height = s.y + "px";
+  // 两个地图视图同步：上层 after 与底层 before 保持完全对齐
+  let syncing = false;
+  function syncTopFromMap() {
+    if (syncing) return;
+    syncing = true;
+    mapTop.setView(map.getCenter(), map.getZoom(), { animate: false });
+    syncing = false;
   }
-  sizeAfterPane();
-  map.on("resize", sizeAfterPane);
+  function syncMapFromTop() {
+    if (syncing) return;
+    syncing = true;
+    map.setView(mapTop.getCenter(), mapTop.getZoom(), { animate: false });
+    syncing = false;
+  }
+  map.on("move zoom", syncTopFromMap);
+  mapTop.on("move zoom", syncMapFromTop);
 
   const drawnItems = new L.FeatureGroup();
   map.addLayer(drawnItems);
@@ -366,7 +372,11 @@
 
   function buildResultLayers() {
     // 移除旧图层（重新分析时）
-    Object.values(layers).forEach((l) => l && map.removeLayer(l));
+    Object.values(layers).forEach((l) => {
+      if (!l) return;
+      if (map.hasLayer(l)) map.removeLayer(l);
+      if (mapTop.hasLayer(l)) mapTop.removeLayer(l);
+    });
     layers = { before: null, after: null, change: null, geojson: null };
     changeLegendAdded = false;
     document.getElementById("change-legend").innerHTML = "";
@@ -375,15 +385,15 @@
       maxZoom: 17, opacity: 0.95,
     });
     layers.after = L.tileLayer(API.tiles(currentJobId, "after"), {
-      maxZoom: 17, opacity: 0.95, pane: "afterPane",
+      maxZoom: 17, opacity: 0.95,
     });
+    layers.after.addTo(mapTop);
     layers.change = L.tileLayer(API.tiles(currentJobId, "change"), {
       maxZoom: 17, opacity: 0.85,
     });
 
     const overlayMaps = {
       "🖼 变化前分类（before）": layers.before,
-      "🖼 变化后分类（after）": layers.after,
       "🎨 变化栅格": layers.change,
     };
     const baseMaps = { "OpenStreetMap": osm, "卫星影像": esri };
@@ -448,7 +458,6 @@
   // ---- 卷帘对比（before / after）----
   const handle = document.getElementById("swipe-handle");
   let swipeEnabled = false;
-  let afterAutoAdded = false;
   let swipeRatio = 0.5; // 竖线相对 AOI 的 [0,1] 比例位置（缩放/平移后据此恢复）
 
   const SwipeToggle = L.Control.extend({
@@ -473,6 +482,7 @@
     swipeEnabled = !swipeEnabled;
     const btn = document.getElementById("swipe-toggle-btn");
     btn.classList.toggle("active", swipeEnabled);
+    const topEl = document.getElementById("map-top");
     if (swipeEnabled) {
       if (!layers.after) {
         // 尚无结果图层：回滚状态，避免按钮卡在开启态
@@ -480,19 +490,13 @@
         swipeEnabled = false;
         return alert("请先完成一次分析，再进行卷帘对比");
       }
-      // 变化前/后分类都保持显示（卷帘左右两侧分别显示 before / after）
+      // 变化前分类保持显示；after 已在上层地图，靠 clip-path 控制左右显隐
       if (!map.hasLayer(layers.before)) map.addLayer(layers.before);
-      if (!map.hasLayer(layers.after)) {
-        map.addLayer(layers.after);
-        afterAutoAdded = true;
-      }
       // 卷帘对比时临时隐藏变化栅格，让右侧显示干净的变化前分类；关闭后恢复
       if (layers.change && map.hasLayer(layers.change)) {
         changeWasVisible = true;
         map.removeLayer(layers.change);
       }
-      // 刷新 pane 尺寸，确保 clip-path 依据最新容器尺寸裁剪
-      sizeAfterPane();
       swipeRatio = 0.5; // 每次开启从中点开始对比
       // 自动把监测范围缩放到地图中央，四周留白，避免与工具栏/图层面板重叠
       if (drawnItems.getLayers().length) {
@@ -502,24 +506,26 @@
           maxZoom: 16,
         });
       }
+      // 让上层地图与底层地图视图对齐
+      mapTop.setView(map.getCenter(), map.getZoom(), { animate: false });
+      topEl.classList.add("swiping");
       handle.hidden = false;
       updateSwipe(null);
       document.addEventListener("mousemove", onSwipeMove);
-      // 缩放/平移结束后按相对比例恢复竖线位置；动画过程中也持续校正，避免裁剪线漂移
+      // 缩放/平移后按相对比例恢复竖线位置；动画过程中也持续校正
       map.on("moveend zoomend move zoomanim", onViewChanged);
+      mapTop.on("moveend zoomend", onViewChanged);
     } else {
       document.removeEventListener("mousemove", onSwipeMove);
       map.off("moveend zoomend move zoomanim", onViewChanged);
+      mapTop.off("moveend zoomend", onViewChanged);
       if (changeWasVisible && layers.change) {
         map.addLayer(layers.change);
       }
       changeWasVisible = false;
-      if (afterAutoAdded && layers.after) {
-        map.removeLayer(layers.after);
-        afterAutoAdded = false;
-      }
       handle.hidden = true;
       clearAfterClip();
+      topEl.classList.remove("swiping");
     }
   }
 
@@ -549,7 +555,7 @@
   }
 
   function updateSwipe(x) {
-    const paneEl = map.getPane("afterPane");
+    const topEl = document.getElementById("map-top");
     const width = map.getContainer().clientWidth;
     const range = getSwipeXRange();
     if (x != null) {
@@ -560,14 +566,10 @@
     const pos = range.left + swipeRatio * (range.right - range.left); // 屏幕坐标
     handle.style.left = `${pos}px`;
 
-    // clip-path 作用在 afterPane 的“本地坐标”（afterPane 会随 map-pane 一起 translate3d 平移）。
-    // 屏幕坐标 pos 需要减去 map-pane 在容器中的平移量，才能换算成 afterPane 的本地裁剪位置，
-    // 否则裁剪线会跟着地理位置走，与屏幕竖线错位。
-    const offsetX = map.layerPointToContainerPoint(L.point(0, 0)).x;
-    const localPos = pos - offsetX;
-    const clip = `inset(0 ${width - localPos}px 0 0)`;
-    paneEl.style.clipPath = clip;
-    paneEl.style.webkitClipPath = clip;
+    // 裁剪上层地图容器（屏幕坐标，不涉及 Leaflet 图层坐标）：
+    // 左侧 [0, pos] 显示 after，右侧露出底层 before。
+    topEl.style.clipPath = `inset(0 ${width - pos}px 0 0)`;
+    topEl.style.webkitClipPath = `inset(0 ${width - pos}px 0 0)`;
   }
 
   function onViewChanged() {
@@ -575,9 +577,9 @@
   }
 
   function clearAfterClip() {
-    const paneEl = map.getPane("afterPane");
-    paneEl.style.clipPath = "";
-    paneEl.style.webkitClipPath = "";
+    const topEl = document.getElementById("map-top");
+    topEl.style.clipPath = "inset(0 100% 0 0)"; // 完全裁剪，隐藏 after
+    topEl.style.webkitClipPath = "inset(0 100% 0 0)";
   }
 
   // ---- 进度 / 日志 / 提示 ----
