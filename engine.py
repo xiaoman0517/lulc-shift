@@ -8,7 +8,7 @@
 
 职责：
   1. 从 Planetary Computer STAC 拉取两个年份的 io-lulc-9-class 分类影像
-  2. 对齐网格后逐像素比较，生成"变化编码栅格"（code = before*10 + after + 1）
+  2. 对齐网格后逐像素比较，生成"变化编码栅格"（code = before*20 + after）
   3. 把解码信息写入 GeoTIFF 元数据标签（命名空间 CHANGE_DECODE）
   4. 转矢量 GeoJSON，属性表带 from_class / to_class / transition / 面积
   5. 通过 Progress 回调向调用方上报进度（Web 端轮询展示）
@@ -43,24 +43,25 @@ COLLECTION = "io-lulc-9-class"
 # io-lulc-9-class 是年度产品，collection 目前只覆盖 2017~2022
 YEARS = list(range(2017, 2023))
 
-# 类别编码（1-based），nodata 值为 11
+# io-lulc-9-class 真实类别编码（见 STAC collection 的 item_assets.data.file:values）
+# 注意：没有 3 和 6；10=云、11=牧场（草地+灌木合并）；nodata=0
 CLASS_NAMES = {
-    1: "水体", 2: "林地", 3: "草地", 4: "洪泛植被",
-    5: "作物", 6: "灌木", 7: "建设用地", 8: "裸地", 9: "雪/冰",
+    1: "水体", 2: "林地", 4: "洪泛植被", 5: "作物",
+    7: "建设用地", 8: "裸地", 9: "雪/冰", 10: "云", 11: "牧场",
 }
-NODATA = 11
+NODATA = 0
 
-# 类别渲染颜色（与 Dynamic World / io-lulc 官方配色一致，RGB）
+# 类别渲染颜色（RGB，云用灰色、牧场用黄褐色）
 CLASS_COLORS = {
     1: (65, 155, 223),      # 水体 水蓝
     2: (57, 125, 73),       # 林地 深绿
-    3: (136, 176, 83),      # 草地 浅绿
     4: (122, 135, 198),     # 洪泛植被 蓝紫
     5: (228, 150, 53),      # 作物 橙黄
-    6: (223, 195, 90),      # 灌木 黄
     7: (196, 40, 27),       # 建设用地 红
     8: (165, 155, 143),     # 裸地 棕灰
     9: (179, 159, 225),     # 雪/冰 淡紫
+    10: (200, 200, 200),    # 云 灰
+    11: (223, 195, 90),     # 牧场 黄褐
 }
 
 # 变化类型调色板（Tab20，瓦片与前端 GeoJSON 共用同一套规则）
@@ -98,15 +99,19 @@ class Progress:
 
 
 def decode(code):
-    """变化编码 -> (before, after)；0 表示无变化，返回 None"""
+    """变化编码 -> (before, after)；0 表示无变化，返回 None。
+
+    编码规则：code = before * 20 + after（基数 20，因为类别含 10、11 两位数，
+    原 before*10+after 会与 after>=10 产生歧义）。
+    """
     if code == 0:
         return None
-    return (code - 1) // 10, (code - 1) % 10
+    return code // 20, code % 20
 
 
 def encode(before, after):
     """类别对 -> 变化编码"""
-    return before * 10 + after + 1
+    return before * 20 + after
 
 
 def _pick_item(items, bbox):
@@ -198,10 +203,10 @@ def write_tif_with_metadata(change_code, profile, transform, crs, path):
         "count": 1,
         "compress": "deflate",
     })
-    # 解码表：0=无变化，其余为 9 类之间所有理论转移
+    # 解码表：0=无变化，其余为所有真实类别之间的转移
     decode_tags = {"0": "无变化"}
-    for b in range(1, 10):
-        for a in range(1, 10):
+    for b in CLASS_NAMES:
+        for a in CLASS_NAMES:
             if b != a:
                 decode_tags[str(encode(b, a))] = f"{CLASS_NAMES[b]} -> {CLASS_NAMES[a]}"
 
@@ -211,7 +216,7 @@ def write_tif_with_metadata(change_code, profile, transform, crs, path):
         dst.update_tags(
             collection=COLLECTION,
             generation="land-cover-analysis demo",
-            description="变化编码：0=无变化；code=before*10+after+1，类别见 CHANGE_DECODE 标签",
+            description="变化编码：0=无变化；code=before*20+after，类别见 CHANGE_DECODE 标签",
         )
     return path
 
@@ -390,7 +395,7 @@ def process_change(bbox, year_before, year_after, out_dir, progress=None):
     change_mask, transitions = summarize_transitions(before_arr, after_aligned)
     change_code = np.where(
         change_mask,
-        before_arr.astype(np.int16) * 10 + after_aligned.astype(np.int16) + 1,
+        before_arr.astype(np.int16) * 20 + after_aligned.astype(np.int16),
         0,
     ).astype(np.int16)
 

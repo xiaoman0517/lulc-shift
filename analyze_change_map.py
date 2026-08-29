@@ -18,19 +18,19 @@ from collections import Counter
 import numpy as np
 import rasterio
 
-# io-lulc-9-class 类别（1-based），与生成 change_map.tif 时的编码一致
+# io-lulc-9-class 真实类别编码（没有 3 和 6；10=云、11=牧场；nodata=0）
 CLASS_NAMES = {
-    1: "水体", 2: "林地", 3: "草地", 4: "洪泛植被",
-    5: "作物", 6: "灌木", 7: "建设用地", 8: "裸地", 9: "雪/冰",
+    1: "水体", 2: "林地", 4: "洪泛植被", 5: "作物",
+    7: "建设用地", 8: "裸地", 9: "雪/冰", 10: "云", 11: "牧场",
 }
-CLASS_LIST = [CLASS_NAMES[i] for i in range(1, 10)]
+CLASS_LIST = [CLASS_NAMES[i] for i in CLASS_NAMES]
 
 
 def decode(code):
-    """变化编码 -> (before, after)，0 表示无变化返回 None"""
+    """变化编码 -> (before, after)，0 表示无变化返回 None（code = before*20 + after）"""
     if code == 0:
         return None
-    return (code - 1) // 10, (code - 1) % 10
+    return code // 20, code % 20
 
 
 def main():
@@ -123,7 +123,7 @@ def main():
     axes[1].set_xticks([]); axes[1].set_yticks([])
 
     labels = ["无变化"] + [
-        f"{code} {CLASS_NAMES[(code - 1) // 10]}→{CLASS_NAMES[(code - 1) % 10]}"
+        f"{code} {CLASS_NAMES[code // 20]}→{CLASS_NAMES[code % 20]}"
         for code in uniq
     ]
     cbar = fig.colorbar(axes[1].images[0], ax=axes[1], fraction=0.046, pad=0.04, ticks=bounds[:-1])

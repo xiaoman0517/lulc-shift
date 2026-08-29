@@ -10,11 +10,14 @@
     tiles: (id, layer) => `/api/jobs/${id}/tiles/${layer}/{z}/{x}/{y}.png`,
   };
 
-  // 与后端 engine.CLASS_NAMES / CLASS_COLORS 一致
-  const CLASS_NAMES = { 1: "水体", 2: "林地", 3: "草地", 4: "洪泛植被", 5: "作物", 6: "灌木", 7: "建设用地", 8: "裸地", 9: "雪/冰" };
+  // 与后端 engine.CLASS_NAMES / CLASS_COLORS 一致（io-lulc-9-class 真实编码）
+  const CLASS_NAMES = {
+    1: "水体", 2: "林地", 4: "洪泛植被", 5: "作物",
+    7: "建设用地", 8: "裸地", 9: "雪/冰", 10: "云", 11: "牧场",
+  };
   const CLASS_COLORS = {
-    1: "#419bdf", 2: "#397d49", 3: "#88b053", 4: "#7a87c6", 5: "#e49635",
-    6: "#dfc35a", 7: "#c4281b", 8: "#a59b8f", 9: "#b39fe1",
+    1: "#419bdf", 2: "#397d49", 4: "#7a87c6", 5: "#e49635",
+    7: "#c4281b", 8: "#a59b8f", 9: "#b39fe1", 10: "#c8c8c8", 11: "#dfc35a",
   };
   const TAB20 = [
     "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
@@ -425,7 +428,7 @@
     const el = document.getElementById("change-legend");
     el.innerHTML = `<div class="item" style="color:#888">（共 ${featureCount} 个多边形）</div>` +
       Object.keys(palette).sort((a, b) => a - b).map((code) => {
-        const b = Math.floor((code - 1) / 10), a = (code - 1) % 10;
+        const b = Math.floor(code / 20), a = code % 20;
         return `<div class="item"><span class="swatch" style="background:${palette[code]}"></span>` +
           `${code} · ${CLASS_NAMES[b]} → ${CLASS_NAMES[a]}</div>`;
       }).join("");

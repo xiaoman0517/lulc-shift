@@ -16,9 +16,9 @@
     - io-lulc-9-class 是 Impact Observatory 提供的10m全球年度土地覆盖分类产品，
       托管在 Planetary Computer，STAC API 免费公开访问
     - 该 collection 目前只覆盖 2017~2022 年，年份必须在此范围内
-    - 9个类别（编码1-9，1-based）: 1=水体 2=林地 3=草地 4=洪泛植被 5=作物
-      6=灌木 7=建设用地 8=裸地 9=雪/冰；nodata 值为 11
-    - 变化编码：0=无变化；code = before*10 + after + 1
+    - 类别编码（无 3 和 6）: 1=水体 2=林地 4=洪泛植被 5=作物 7=建设用地
+      8=裸地 9=雪/冰 10=云 11=牧场；nodata 值为 0
+    - 变化编码：0=无变化；code = before*20 + after
 """
 import os
 import shutil
