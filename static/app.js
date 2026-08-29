@@ -150,40 +150,50 @@
   }
 
   map.on("click", (e) => {
-    if (!rectMode) return;
-    if (!rectStart) {
-      rectStart = e.latlng;
-      rectPreview = L.rectangle(L.latLngBounds(rectStart, rectStart), {
-        color: "#f08a4b", weight: 2, dashArray: "4,4", fillOpacity: 0.05,
-        pane: "markerPane",
-      });
-      rectPreview.addTo(map);
-      setMapTip("再点击第二个对角点完成矩形");
-    } else {
-      const b = L.latLngBounds(rectStart, e.latlng);
-      rectStart = null;
-      if (rectPreview) {
-        map.removeLayer(rectPreview);
-        rectPreview = null;
+    // 两点绘制矩形模式优先
+    if (rectMode) {
+      if (!rectStart) {
+        rectStart = e.latlng;
+        rectPreview = L.rectangle(L.latLngBounds(rectStart, rectStart), {
+          color: "#f08a4b", weight: 2, dashArray: "4,4", fillOpacity: 0.05,
+          pane: "markerPane",
+        });
+        rectPreview.addTo(map);
+        setMapTip("再点击第二个对角点完成矩形");
+      } else {
+        const b = L.latLngBounds(rectStart, e.latlng);
+        rectStart = null;
+        if (rectPreview) {
+          map.removeLayer(rectPreview);
+          rectPreview = null;
+        }
+        // 过滤零宽度/零高度的无效点击
+        if (b.getNorth() - b.getSouth() < 0.0001 || b.getEast() - b.getWest() < 0.0001) {
+          setMapTip("区域过小，请重新点击两个角点");
+          return;
+        }
+        // 超过处理范围上限时拒绝生成，提示重新绘制
+        if (b.getEast() - b.getWest() > MAX_BBOX_DEG || b.getNorth() - b.getSouth() > MAX_BBOX_DEG) {
+          setMapTip(`范围过大：单边需不超过 ${MAX_BBOX_DEG}°，请重新绘制`);
+          return;
+        }
+        // 同一时刻只保留一个矩形：新矩形替换旧矩形
+        drawnItems.clearLayers();
+        const rect = L.rectangle(b, { color: "#0e9f8c", weight: 2, fillOpacity: 0.08, pane: "markerPane" });
+        drawnItems.addLayer(rect);
+        // 同步更新检测范围数值
+        setBboxInputs(rect);
+        hideMapTip();
+        toggleRectMode(); // 完成一次绘制后自动退出绘制模式
       }
-      // 过滤零宽度/零高度的无效点击
-      if (b.getNorth() - b.getSouth() < 0.0001 || b.getEast() - b.getWest() < 0.0001) {
-        setMapTip("区域过小，请重新点击两个角点");
-        return;
+      return;
+    }
+
+    // 卷帘开启时：点击监测范围（AOI）之外 → 自动关闭卷帘
+    if (swipeEnabled && drawnItems.getLayers().length) {
+      if (!drawnItems.getBounds().contains(e.latlng)) {
+        toggleSwipe();
       }
-      // 超过处理范围上限时拒绝生成，提示重新绘制
-      if (b.getEast() - b.getWest() > MAX_BBOX_DEG || b.getNorth() - b.getSouth() > MAX_BBOX_DEG) {
-        setMapTip(`范围过大：单边需不超过 ${MAX_BBOX_DEG}°，请重新绘制`);
-        return;
-      }
-      // 同一时刻只保留一个矩形：新矩形替换旧矩形
-      drawnItems.clearLayers();
-      const rect = L.rectangle(b, { color: "#0e9f8c", weight: 2, fillOpacity: 0.08, pane: "markerPane" });
-      drawnItems.addLayer(rect);
-      // 同步更新检测范围数值
-      setBboxInputs(rect);
-      hideMapTip();
-      toggleRectMode(); // 完成一次绘制后自动退出绘制模式
     }
   });
 
@@ -439,6 +449,7 @@
   const handle = document.getElementById("swipe-handle");
   let swipeEnabled = false;
   let afterAutoAdded = false;
+  let swipeRatio = 0.5; // 竖线相对 AOI 的 [0,1] 比例位置（缩放/平移后据此恢复）
 
   const SwipeToggle = L.Control.extend({
     options: { position: "topleft" },
@@ -482,6 +493,7 @@
       }
       // 刷新 pane 尺寸，确保 clip-path 依据最新容器尺寸裁剪
       sizeAfterPane();
+      swipeRatio = 0.5; // 每次开启从中点开始对比
       // 自动把监测范围缩放到地图中央，四周留白，避免与工具栏/图层面板重叠
       if (drawnItems.getLayers().length) {
         map.fitBounds(drawnItems.getBounds(), {
@@ -493,11 +505,11 @@
       handle.hidden = false;
       updateSwipe(null);
       document.addEventListener("mousemove", onSwipeMove);
-      // fitBounds 动画结束后校正竖线位置（moveend 为主，setTimeout 兜底）
-      map.once("moveend", () => { if (swipeEnabled) updateSwipe(null); });
-      setTimeout(() => { if (swipeEnabled) updateSwipe(null); }, 350);
+      // 缩放/平移结束后按相对比例恢复竖线位置
+      map.on("moveend zoomend", onViewChanged);
     } else {
       document.removeEventListener("mousemove", onSwipeMove);
+      map.off("moveend zoomend", onViewChanged);
       if (changeWasVisible && layers.change) {
         map.addLayer(layers.change);
       }
@@ -540,13 +552,20 @@
     const paneEl = map.getPane("afterPane");
     const width = map.getContainer().clientWidth;
     const range = getSwipeXRange();
-    const pos = x == null
-      ? Math.floor((range.left + range.right) / 2)
-      : Math.max(range.left, Math.min(range.right, x));
+    if (x != null) {
+      // 把鼠标位置换算成相对 AOI 的 [0,1] 比例
+      swipeRatio = (x - range.left) / (range.right - range.left);
+    }
+    swipeRatio = Math.max(0, Math.min(1, swipeRatio));
+    const pos = range.left + swipeRatio * (range.right - range.left);
     handle.style.left = `${pos}px`;
     const clip = `inset(0 ${width - pos}px 0 0)`;
     paneEl.style.clipPath = clip;
     paneEl.style.webkitClipPath = clip;
+  }
+
+  function onViewChanged() {
+    if (swipeEnabled) updateSwipe(null);
   }
 
   function clearAfterClip() {
