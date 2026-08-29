@@ -379,23 +379,29 @@
       if (map.hasLayer(l)) map.removeLayer(l);
       if (mapTop.hasLayer(l)) mapTop.removeLayer(l);
     });
-    layers = { before: null, after: null, change: null, geojson: null };
+    layers = { before: null, after: null, afterTop: null, change: null, geojson: null };
     changeLegendAdded = false;
     document.getElementById("change-legend").innerHTML = "";
 
     layers.before = L.tileLayer(API.tiles(currentJobId, "before"), {
       maxZoom: 17, opacity: 0.95,
     });
+    // 底层 after：用于图层面板单独查看"变化后分类"
     layers.after = L.tileLayer(API.tiles(currentJobId, "after"), {
       maxZoom: 17, opacity: 0.95,
     });
-    layers.after.addTo(mapTop);
+    // 上层 after：卷帘对比专用（覆盖在底层地图之上，由 clip-path 控制显隐）
+    layers.afterTop = L.tileLayer(API.tiles(currentJobId, "after"), {
+      maxZoom: 17, opacity: 0.95,
+    });
+    layers.afterTop.addTo(mapTop);
     layers.change = L.tileLayer(API.tiles(currentJobId, "change"), {
       maxZoom: 17, opacity: 0.85,
     });
 
     const overlayMaps = {
       "🖼 变化前分类（before）": layers.before,
+      "🖼 变化后分类（after）": layers.after,
       "🎨 变化栅格": layers.change,
     };
     const baseMaps = { "OpenStreetMap": osm, "卫星影像": esri };
@@ -405,12 +411,13 @@
       window.layerControl.remove();
     }
     window.layerControl = L.control.layers(baseMaps, overlayMaps, { collapsed: false }).addTo(map);
+    // 图层互斥：分类（before/after） 与 变化栅格 / 变化矢量 三组之间单选
+    window.layerControl.on("overlayadd", handleOverlayAdd);
 
-    // 默认显示 before + 变化栅格
+    // 默认显示变化前分类（卷帘开启时再叠加变化后分类）
     layers.before.addTo(map);
-    layers.change.addTo(map);
 
-    // 加载变化矢量 GeoJSON 预览
+    // 加载变化矢量 GeoJSON（互斥选择后才显示，不自动叠加）
     fetch(API.download(currentJobId, "geojson"))
       .then((r) => r.json())
       .then((data) => {
@@ -430,13 +437,13 @@
               `<b>${p.transition}</b><br/>编码：${p.code}<br/>` +
               `面积：${p.area_ha.toFixed(2)} ha（${p.area_m2.toLocaleString()} m²）`
             );
+            // 悬停多边形显示变化类型标签
+            layer.bindTooltip(p.transition, { sticky: true });
           },
         });
         if (window.layerControl) {
-          window.layerControl.addOverlay(layers.geojson, "🔺 变化矢量（点击查看属性）");
+          window.layerControl.addOverlay(layers.geojson, "🔺 变化矢量（悬停查看变化类型）");
         }
-        // 自动显示变化矢量，方便立即查看
-        map.addLayer(layers.geojson);
         renderChangeLegend(palette, data.features.length);
       })
       .catch(() => console.warn("变化矢量加载失败"));
@@ -444,6 +451,37 @@
     if (drawnItems.getLayers().length) {
       map.fitBounds(drawnItems.getBounds().pad(0.3));
     }
+  }
+
+  // ---- 图层互斥：分类（before/after）与 变化栅格 / 变化矢量 三组之间单选 ----
+  let suppressingExclusive = false;
+
+  function overlayGroup(layer) {
+    if (layer === layers.before || layer === layers.after) return "class";
+    if (layer === layers.change) return "raster";
+    if (layer === layers.geojson) return "vector";
+    return null;
+  }
+
+  function handleOverlayAdd(e) {
+    if (suppressingExclusive) return;
+    const group = overlayGroup(e.layer);
+    if (!group) return;
+    // 图层面板操作时先退出卷帘（卷帘是独立的"前后分类对比"模式）
+    if (swipeEnabled) toggleSwipe();
+    const removeList = [];
+    if (group === "class") {
+      removeList.push(layers.change, layers.geojson);
+    } else if (group === "raster") {
+      removeList.push(layers.before, layers.after, layers.geojson);
+    } else if (group === "vector") {
+      removeList.push(layers.before, layers.after, layers.change);
+    }
+    removeList.forEach((l) => {
+      if (l && map.hasLayer(l) && window.layerControl) {
+        window.layerControl.removeLayer(l);
+      }
+    });
   }
 
   function renderChangeLegend(palette, featureCount) {
@@ -479,6 +517,8 @@
   map.addControl(new SwipeToggle());
 
   let changeWasVisible = false;
+  let vectorWasVisible = false;
+  let afterWasVisible = false;
 
   function toggleSwipe() {
     swipeEnabled = !swipeEnabled;
@@ -486,18 +526,26 @@
     btn.classList.toggle("active", swipeEnabled);
     const topEl = document.getElementById("map-top");
     if (swipeEnabled) {
-      if (!layers.after) {
+      if (!layers.afterTop) {
         // 尚无结果图层：回滚状态，避免按钮卡在开启态
         btn.classList.remove("active");
         swipeEnabled = false;
         return alert("请先完成一次分析，再进行卷帘对比");
       }
-      // 变化前分类保持显示；after 已在上层地图，靠 clip-path 控制左右显隐
+      // 卷帘默认演示"变化前后分类"：确保 before 在底层显示
       if (!map.hasLayer(layers.before)) map.addLayer(layers.before);
-      // 卷帘对比时临时隐藏变化栅格，让右侧显示干净的变化前分类；关闭后恢复
+      // 卷帘时隐藏互斥的其他图层（栅格/矢量/底层 after），关闭后恢复
       if (layers.change && map.hasLayer(layers.change)) {
         changeWasVisible = true;
         map.removeLayer(layers.change);
+      }
+      if (layers.geojson && map.hasLayer(layers.geojson)) {
+        vectorWasVisible = true;
+        map.removeLayer(layers.geojson);
+      }
+      if (layers.after && map.hasLayer(layers.after)) {
+        afterWasVisible = true;
+        map.removeLayer(layers.after);
       }
       swipeRatio = 0.5; // 每次开启从中点开始对比
       // 自动把监测范围缩放到地图中央，四周留白，避免与工具栏/图层面板重叠
@@ -521,10 +569,13 @@
       document.removeEventListener("mousemove", onSwipeMove);
       map.off("moveend zoomend move zoomanim", onViewChanged);
       mapTop.off("moveend zoomend", onViewChanged);
-      if (changeWasVisible && layers.change) {
-        map.addLayer(layers.change);
-      }
-      changeWasVisible = false;
+      // 恢复被卷帘临时隐藏的图层（抑制互斥，避免恢复时互相移除）
+      suppressingExclusive = true;
+      if (changeWasVisible && layers.change) map.addLayer(layers.change);
+      if (vectorWasVisible && layers.geojson) map.addLayer(layers.geojson);
+      if (afterWasVisible && layers.after) map.addLayer(layers.after);
+      suppressingExclusive = false;
+      changeWasVisible = vectorWasVisible = afterWasVisible = false;
       handle.hidden = true;
       clearAfterClip();
       topEl.classList.remove("swiping");
