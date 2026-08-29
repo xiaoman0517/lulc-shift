@@ -505,11 +505,11 @@
       handle.hidden = false;
       updateSwipe(null);
       document.addEventListener("mousemove", onSwipeMove);
-      // 缩放/平移结束后按相对比例恢复竖线位置
-      map.on("moveend zoomend", onViewChanged);
+      // 缩放/平移结束后按相对比例恢复竖线位置；动画过程中也持续校正，避免裁剪线漂移
+      map.on("moveend zoomend move zoomanim", onViewChanged);
     } else {
       document.removeEventListener("mousemove", onSwipeMove);
-      map.off("moveend zoomend", onViewChanged);
+      map.off("moveend zoomend move zoomanim", onViewChanged);
       if (changeWasVisible && layers.change) {
         map.addLayer(layers.change);
       }
@@ -557,9 +557,15 @@
       swipeRatio = (x - range.left) / (range.right - range.left);
     }
     swipeRatio = Math.max(0, Math.min(1, swipeRatio));
-    const pos = range.left + swipeRatio * (range.right - range.left);
+    const pos = range.left + swipeRatio * (range.right - range.left); // 屏幕坐标
     handle.style.left = `${pos}px`;
-    const clip = `inset(0 ${width - pos}px 0 0)`;
+
+    // clip-path 作用在 afterPane 的“本地坐标”（afterPane 会随 map-pane 一起 translate3d 平移）。
+    // 屏幕坐标 pos 需要减去 map-pane 在容器中的平移量，才能换算成 afterPane 的本地裁剪位置，
+    // 否则裁剪线会跟着地理位置走，与屏幕竖线错位。
+    const offsetX = map.layerPointToContainerPoint(L.point(0, 0)).x;
+    const localPos = pos - offsetX;
+    const clip = `inset(0 ${width - localPos}px 0 0)`;
     paneEl.style.clipPath = clip;
     paneEl.style.webkitClipPath = clip;
   }
