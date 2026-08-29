@@ -439,8 +439,12 @@
               `<b>${p.transition}</b><br/>编码：${p.code}<br/>` +
               `面积：${p.area_ha.toFixed(2)} ha（${p.area_m2.toLocaleString()} m²）`
             );
-            // 悬停多边形显示变化类型标签
-            layer.bindTooltip(p.transition, { sticky: true });
+            // 常显变化类型标签：只标注面积较大的主要变化区，避免密集多边形叠满文字
+            if (p.area_ha >= 1) {
+              layer.bindTooltip(p.transition, {
+                permanent: true, direction: "center", className: "transition-label",
+              });
+            }
           },
         });
         if (window.layerControl) {
@@ -480,8 +484,9 @@
       removeList.push(layers.before, layers.after, layers.change);
     }
     removeList.forEach((l) => {
-      if (l && map.hasLayer(l) && window.layerControl) {
-        window.layerControl.removeLayer(l);
+      if (l && map.hasLayer(l)) {
+        // 只移除图层（图层面板选项保留，checkbox 自动取消勾选）
+        map.removeLayer(l);
       }
     });
   }

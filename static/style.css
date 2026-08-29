@@ -273,6 +273,19 @@ tbody tr:hover { background: #f6fbfa; }
 .rect-tool.active { background: var(--brand-deep); color: #fff; }
 
 /* Leaflet 控件美化 */
+.leaflet-tooltip.transition-label {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: #222;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+}
+.leaflet-tooltip.transition-label::before {
+  display: none; /* 去掉小箭头，更清爽 */
+}
 .leaflet-control-layers {
   border-radius: 10px !important;
   box-shadow: var(--shadow-sm) !important;
