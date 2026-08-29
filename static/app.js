@@ -75,6 +75,20 @@
   map.createPane("afterPane");
   map.getPane("afterPane").style.zIndex = 500;
 
+  // Leaflet 的 pane 默认没有宽高，clip-path 会失效；这里显式给 afterPane 设置
+  // 与地图容器一致的像素尺寸，clip-path 才能按"容器像素"正确裁剪。
+  function sizeAfterPane() {
+    const pane = map.getPane("afterPane");
+    if (!pane) return;
+    const s = map.getSize();
+    pane.style.left = "0px";
+    pane.style.top = "0px";
+    pane.style.width = s.x + "px";
+    pane.style.height = s.y + "px";
+  }
+  sizeAfterPane();
+  map.on("resize", sizeAfterPane);
+
   const drawnItems = new L.FeatureGroup();
   map.addLayer(drawnItems);
   // 禁用拖拽式画矩形（改为自定义"点击两点"绘制），仅保留编辑/删除能力
@@ -138,6 +152,7 @@
       rectStart = e.latlng;
       rectPreview = L.rectangle(L.latLngBounds(rectStart, rectStart), {
         color: "#f08a4b", weight: 2, dashArray: "4,4", fillOpacity: 0.05,
+        pane: "markerPane",
       });
       rectPreview.addTo(map);
       setMapTip("再点击第二个对角点完成矩形");
@@ -160,7 +175,7 @@
       }
       // 同一时刻只保留一个矩形：新矩形替换旧矩形
       drawnItems.clearLayers();
-      const rect = L.rectangle(b, { color: "#0e9f8c", weight: 2, fillOpacity: 0.08 });
+      const rect = L.rectangle(b, { color: "#0e9f8c", weight: 2, fillOpacity: 0.08, pane: "markerPane" });
       drawnItems.addLayer(rect);
       // 同步更新检测范围数值
       setBboxInputs(rect);
@@ -379,6 +394,7 @@
         codes.forEach((c, i) => { palette[c] = TAB20[i % TAB20.length]; });
 
         layers.geojson = L.geoJSON(data, {
+          pane: "markerPane",
           style: (f) => ({
             color: "#333", weight: 0.6,
             fillColor: palette[f.properties.code], fillOpacity: 0.6,
@@ -461,6 +477,8 @@
         changeWasVisible = true;
         map.removeLayer(layers.change);
       }
+      // 刷新 pane 尺寸，确保 clip-path 依据最新容器尺寸裁剪
+      sizeAfterPane();
       // 自动把监测范围缩放到地图中央，四周留白，避免与工具栏/图层面板重叠
       if (drawnItems.getLayers().length) {
         map.fitBounds(drawnItems.getBounds(), {
@@ -472,8 +490,9 @@
       handle.hidden = false;
       updateSwipe(null);
       document.addEventListener("mousemove", onSwipeMove);
-      // 等 fitBounds 动画结束后校正一次竖线位置
-      setTimeout(() => updateSwipe(null), 300);
+      // fitBounds 动画结束后校正竖线位置（moveend 为主，setTimeout 兜底）
+      map.once("moveend", () => { if (swipeEnabled) updateSwipe(null); });
+      setTimeout(() => { if (swipeEnabled) updateSwipe(null); }, 350);
     } else {
       document.removeEventListener("mousemove", onSwipeMove);
       if (changeWasVisible && layers.change) {
