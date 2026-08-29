@@ -411,8 +411,10 @@
       window.layerControl.remove();
     }
     window.layerControl = L.control.layers(baseMaps, overlayMaps, { collapsed: false }).addTo(map);
-    // 图层互斥：分类（before/after） 与 变化栅格 / 变化矢量 三组之间单选
-    window.layerControl.on("overlayadd", handleOverlayAdd);
+    // 图层互斥：分类（before/after） 与 变化栅格 / 变化矢量 三组之间单选。
+    // overlayadd 是地图事件（由 layers control 添加 overlay 时触发），绑定在 map 上。
+    map.off("overlayadd", handleOverlayAdd);
+    map.on("overlayadd", handleOverlayAdd);
 
     // 默认显示变化前分类（卷帘开启时再叠加变化后分类）
     layers.before.addTo(map);
