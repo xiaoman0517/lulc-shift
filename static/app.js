@@ -345,7 +345,6 @@
 
   // ---- 结果渲染 ----
   let layers = { before: null, after: null, change: null, geojson: null };
-  let changeLegendAdded = false;
 
   function renderResult(result) {
     document.getElementById("result-summary").innerHTML =
@@ -380,8 +379,6 @@
       if (mapTop.hasLayer(l)) mapTop.removeLayer(l);
     });
     layers = { before: null, after: null, afterTop: null, change: null, geojson: null };
-    changeLegendAdded = false;
-    document.getElementById("change-legend").innerHTML = "";
 
     layers.before = L.tileLayer(API.tiles(currentJobId, "before"), {
       maxZoom: 17, opacity: 0.95,
@@ -419,41 +416,6 @@
     // 默认显示变化前分类（卷帘开启时再叠加变化后分类）
     layers.before.addTo(map);
 
-    // 加载变化矢量 GeoJSON（互斥选择后才显示，不自动叠加）
-    fetch(API.download(currentJobId, "geojson"))
-      .then((r) => r.json())
-      .then((data) => {
-        const codes = [...new Set(data.features.map((f) => f.properties.code))].sort((a, b) => a - b);
-        const palette = {};
-        codes.forEach((c, i) => { palette[c] = TAB20[i % TAB20.length]; });
-
-        layers.geojson = L.geoJSON(data, {
-          pane: "markerPane",
-          style: (f) => ({
-            color: "#333", weight: 0.6,
-            fillColor: palette[f.properties.code], fillOpacity: 0.6,
-          }),
-          onEachFeature: (f, layer) => {
-            const p = f.properties;
-            layer.bindPopup(
-              `<b>${p.transition}</b><br/>编码：${p.code}<br/>` +
-              `面积：${p.area_ha.toFixed(2)} ha（${p.area_m2.toLocaleString()} m²）`
-            );
-            // 常显变化类型标签：只标注面积较大的主要变化区，避免密集多边形叠满文字
-            if (p.area_ha >= 1) {
-              layer.bindTooltip(p.transition, {
-                permanent: true, direction: "center", className: "transition-label",
-              });
-            }
-          },
-        });
-        if (window.layerControl) {
-          window.layerControl.addOverlay(layers.geojson, "🔺 变化矢量（悬停查看变化类型）");
-        }
-        renderChangeLegend(palette, data.features.length);
-      })
-      .catch(() => console.warn("变化矢量加载失败"));
-
     if (drawnItems.getLayers().length) {
       map.fitBounds(drawnItems.getBounds().pad(0.3));
     }
@@ -465,7 +427,6 @@
   function overlayGroup(layer) {
     if (layer === layers.before || layer === layers.after) return "class";
     if (layer === layers.change) return "raster";
-    if (layer === layers.geojson) return "vector";
     return null;
   }
 
@@ -477,11 +438,9 @@
     if (swipeEnabled) toggleSwipe();
     const removeList = [];
     if (group === "class") {
-      removeList.push(layers.change, layers.geojson);
+      removeList.push(layers.change);
     } else if (group === "raster") {
-      removeList.push(layers.before, layers.after, layers.geojson);
-    } else if (group === "vector") {
-      removeList.push(layers.before, layers.after, layers.change);
+      removeList.push(layers.before, layers.after);
     }
     removeList.forEach((l) => {
       if (l && map.hasLayer(l)) {
@@ -489,17 +448,6 @@
         map.removeLayer(l);
       }
     });
-  }
-
-  function renderChangeLegend(palette, featureCount) {
-    const el = document.getElementById("change-legend");
-    el.innerHTML = `<div class="item" style="color:#888">（共 ${featureCount} 个多边形）</div>` +
-      Object.keys(palette).sort((a, b) => a - b).map((code) => {
-        const b = Math.floor(code / 20), a = code % 20;
-        return `<div class="item"><span class="swatch" style="background:${palette[code]}"></span>` +
-          `${code} · ${CLASS_NAMES[b]} → ${CLASS_NAMES[a]}</div>`;
-      }).join("");
-    changeLegendAdded = true;
   }
 
   // ---- 卷帘对比（before / after）----
@@ -524,7 +472,6 @@
   map.addControl(new SwipeToggle());
 
   let changeWasVisible = false;
-  let vectorWasVisible = false;
   let afterWasVisible = false;
 
   function toggleSwipe() {
@@ -541,19 +488,17 @@
       }
       // 卷帘默认演示"变化前后分类"：确保 before 在底层显示
       if (!map.hasLayer(layers.before)) map.addLayer(layers.before);
-      // 卷帘时隐藏互斥的其他图层（栅格/矢量/底层 after），关闭后恢复
+      // 卷帘时隐藏互斥的其他图层（栅格/底层 after），关闭后恢复
       if (layers.change && map.hasLayer(layers.change)) {
         changeWasVisible = true;
         map.removeLayer(layers.change);
-      }
-      if (layers.geojson && map.hasLayer(layers.geojson)) {
-        vectorWasVisible = true;
-        map.removeLayer(layers.geojson);
       }
       if (layers.after && map.hasLayer(layers.after)) {
         afterWasVisible = true;
         map.removeLayer(layers.after);
       }
+      // 图层面板显示"before + after 都选中"（after 实际由上层地图承载）
+      setLayerCheckbox("after", true);
       swipeRatio = 0.5; // 每次开启从中点开始对比
       // 自动把监测范围缩放到地图中央，四周留白，避免与工具栏/图层面板重叠
       if (drawnItems.getLayers().length) {
@@ -577,15 +522,31 @@
       map.off("moveend zoomend move zoomanim", onViewChanged);
       mapTop.off("moveend zoomend", onViewChanged);
       // 恢复被卷帘临时隐藏的图层（抑制互斥，避免恢复时互相移除）
+      const restoreAfter = afterWasVisible;
       suppressingExclusive = true;
       if (changeWasVisible && layers.change) map.addLayer(layers.change);
-      if (vectorWasVisible && layers.geojson) map.addLayer(layers.geojson);
       if (afterWasVisible && layers.after) map.addLayer(layers.after);
       suppressingExclusive = false;
-      changeWasVisible = vectorWasVisible = afterWasVisible = false;
+      // after 勾选状态恢复为卷帘前实际状态
+      setLayerCheckbox("after", restoreAfter);
+      changeWasVisible = afterWasVisible = false;
       handle.hidden = true;
       clearAfterClip();
       topEl.classList.remove("swiping");
+    }
+  }
+
+  // 手动设置图层面板某个 overlay 的勾选状态（仅改勾选，不实际添加/移除图层）
+  function setLayerCheckbox(layerName, checked) {
+    const panel = document.querySelector(".leaflet-control-layers");
+    if (!panel) return;
+    const labels = panel.querySelectorAll(".leaflet-control-layers-overlays label");
+    for (const label of labels) {
+      if (label.textContent.indexOf(layerName) >= 0) {
+        const input = label.querySelector("input.leaflet-control-layers-selector");
+        if (input) input.checked = !!checked;
+        break;
+      }
     }
   }
 
