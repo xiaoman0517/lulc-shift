@@ -273,13 +273,13 @@ def render_tile(tif_path, z, x, y, kind="class", tile_size=256):
         with rasterio.open(tif_path) as src:
             b = transform_bounds("EPSG:3857", src.crs, west, south, east, north)
             window = rasterio.windows.from_bounds(*b, transform=src.transform)
-            window = window.intersection(
-                rasterio.windows.Window(0, 0, src.width, src.height))
-            if window.width <= 0 or window.height <= 0:
-                return _empty_png(tile_size)
+            # 用完整窗口 + boundless 读取：瓦片中落在 AOI（数据集）之外的部分
+            # 由 fill_value=0（nodata）填充并保持透明，避免“裁剪后拉伸”导致内容
+            # 溢出到正确地理范围之外。
             arr = src.read(
                 1, window=window, out_shape=(tile_size, tile_size),
-                resampling=Resampling.nearest)
+                resampling=Resampling.nearest,
+                boundless=True, fill_value=0)
     except Exception:
         return _empty_png(tile_size)
 
