@@ -172,6 +172,13 @@ body {
 #result-summary b { color: var(--brand-deep); }
 .download-row { display: flex; gap: 10px; margin: 12px 0; }
 .download-row .btn { flex: 1; }
+.download-sub {
+  display: flex; justify-content: center; gap: 8px;
+  font-size: 12px; color: var(--ink-2);
+  margin: -6px 0 10px;
+}
+.download-sub a { color: var(--brand-deep); text-decoration: none; }
+.download-sub a:hover { text-decoration: underline; }
 
 .tip-card {
   background: #f4f9fa; border: 1px dashed #bcd7da;

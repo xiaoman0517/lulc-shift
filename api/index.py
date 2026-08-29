@@ -19,11 +19,13 @@ Vercel 部署：
 注意：任务状态保存在进程内存中（demo 级别）。多实例/冷启动时进度可能丢失，
 生产环境应替换为 Redis/Postgres 等持久化队列，见 README。
 """
+import io
 import os
 import sys
 import tempfile
 import threading
 import uuid
+import zipfile
 
 # 确保能 import 项目根目录的 engine.py（Vercel / 本地 uvicorn 通用）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -219,6 +221,48 @@ def download(job_id: str, fmt: str = "tif"):
         raise HTTPException(status_code=404, detail="结果文件不存在")
     media = "image/tiff" if fmt == "tif" else "application/geo+json"
     return FileResponse(path, media_type=media, filename=os.path.basename(path))
+
+
+@app.get("/api/jobs/{job_id}/download/zip")
+def download_zip(job_id: str):
+    """一次性打包下载全部结果：前后分类 + 变化栅格 + 带属性的矢量变化图层"""
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if job["status"] != "done":
+        raise HTTPException(status_code=409, detail="任务尚未完成")
+
+    members = [
+        ("before", "before.tif", "变化前分类栅格"),
+        ("after", "after.tif", "变化后分类栅格"),
+        ("tif", "change_map.tif", "变化编码栅格"),
+        ("geojson", "change_map.geojson", "变化矢量（含属性）"),
+    ]
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for key, name, desc in members:
+            path = job["files"].get(key)
+            if path and os.path.exists(path):
+                zf.write(path, name)
+        zf.writestr(
+            "README.txt",
+            "土地覆盖变化检测结果\n"
+            "====================\n"
+            "变化编码规则：0=无变化；code = before*20 + after，即 before = code//20，after = code%20\n"
+            "类别编码：1=水体 2=林地 4=洪泛植被 5=作物 7=建设用地 8=裸地 9=雪/冰 10=云 11=牧场；nodata=0\n\n"
+            "文件说明：\n"
+            "  before.tif        变化前分类栅格（10m）\n"
+            "  after.tif         变化后分类栅格（10m）\n"
+            "  change_map.tif    变化编码栅格（CHANGE_DECODE 元数据标签含完整解码表）\n"
+            "  change_map.geojson 变化多边形矢量（属性表含 code/from_class/to_class/transition/area）\n"
+            "  可在 QGIS / ArcGIS 中直接打开。\n",
+        )
+    buffer.seek(0)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="land_cover_change.zip"'},
+    )
 
 
 # 瓦片渲染内存缓存（demo 级；key 含 tif 路径，任务完成后结果不可变，缓存安全）

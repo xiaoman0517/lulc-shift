@@ -7,6 +7,7 @@
     createJob: "/api/jobs",
     job: (id) => `/api/jobs/${id}`,
     download: (id, fmt) => `/api/jobs/${id}/download?fmt=${fmt}`,
+    zip: (id) => `/api/jobs/${id}/download/zip`,
     tiles: (id, layer) => `/api/jobs/${id}/tiles/${layer}/{z}/{x}/{y}.png`,
   };
 
@@ -353,6 +354,7 @@
       `<p>变化像素 <b>${result.changed_pixels.toLocaleString()}</b>（占 ${(result.change_percent * 100).toFixed(2)}%）` +
       `，约 <b>${(result.changed_pixels * result.pixel_area_m2 / 1e4).toFixed(1)}</b> 公顷。</p>`;
 
+    document.getElementById("dl-zip").href = API.zip(currentJobId);
     document.getElementById("dl-tif").href = API.download(currentJobId, "tif");
     document.getElementById("dl-geojson").href = API.download(currentJobId, "geojson");
 
