@@ -4,7 +4,7 @@
 ========================
 被两处复用：
   - CLI 脚本 change_detection_demo.py
-  - Web API  api/index.py（Vercel 部署）
+  - Web API  app.py（Vercel 部署）
 
 职责：
   1. 从 Planetary Computer STAC 拉取两个年份的 io-lulc-9-class 分类影像

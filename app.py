@@ -2,20 +2,24 @@
 """
 Land Cover Change Detection - Web API
 =====================================
-FastAPI 应用，提供：
+FastAPI 应用（根目录入口，供 Vercel Python zero-config 检测）：
   - GET  /                   前端页面（静态托管）
   - GET  /static/{name}      前端静态资源
   - GET  /api/meta           数据源/年份/类别元信息
   - POST /api/jobs           创建变化检测任务 {bbox, year_before, year_after}
   - GET  /api/jobs/{id}      轮询任务状态与进度
   - GET  /api/jobs/{id}/download?fmt=tif|geojson   下载结果
+  - GET  /api/jobs/{id}/download/zip               打包下载全部结果
 
 本地运行：
     pip install -r requirements.txt
-    uvicorn api.index:app --reload
+    uvicorn app:app --reload
 
 Vercel 部署：
-    vercel.json 已配置 Python runtime + rewrites，直接 `vercel --prod`。
+    入口文件必须是根目录的 app.py（Vercel 自动识别 FastAPI 并"按原始路径"
+    把每个请求路由到本应用）。不要在 vercel.json 里添加 rewrites 到 api/index.py
+    ——Vercel 的 FastAPI 路由会把重写后的路径透传给应用，导致 404 {"detail":"Not Found"}。
+
 注意：任务状态保存在进程内存中（demo 级别）。多实例/冷启动时进度可能丢失，
 生产环境应替换为 Redis/Postgres 等持久化队列，见 README。
 """
@@ -27,8 +31,8 @@ import threading
 import uuid
 import zipfile
 
-# 确保能 import 项目根目录的 engine.py（Vercel / 本地 uvicorn 通用）
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 确保能 import 项目根目录的 engine.py
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -66,7 +70,7 @@ def get_engine():
         raise HTTPException(status_code=500, detail=f"处理引擎加载失败：{_engine_error}")
     return _engine
 
-STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 WORK_ROOT = os.path.join(tempfile.gettempdir(), "lulc_jobs")
 
 app = FastAPI(title="Land Cover Change Detection", version="1.0.0")
@@ -295,3 +299,5 @@ def tile(job_id: str, layer: str, z: int, x: int, y: int):
         media_type="image/png",
         headers={"Cache-Control": "public, max-age=3600"},
     )
+
+

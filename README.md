@@ -42,7 +42,7 @@
 ## 目录结构
 
 ```
-├── api/index.py              # FastAPI 应用（Vercel Python Runtime 入口）
+├── app.py                   # FastAPI 应用（Vercel Python 根目录入口，zero-config）
 ├── engine.py                 # 处理引擎：拉取/对齐/统计 + tif 元数据 + GeoJSON + 瓦片渲染
 ├── static/                   # 前端页面（index.html / app.js / style.css）
 ├── change_detection_demo.py  # CLI 版本
@@ -64,7 +64,7 @@ pip install -r requirements.txt
 python change_detection_demo.py
 
 # 2b. 启动 Web Demo
-uvicorn api.index:app --reload
+uvicorn app:app --reload
 # 浏览器打开 http://127.0.0.1:8000
 ```
 
@@ -88,8 +88,12 @@ git push -u origin main
 ### 2. 导入到 Vercel
 
 1. 打开 [vercel.com/new](https://vercel.com/new)，选择 **Import Git Repository** → 选中本项目
-2. Framework Preset 选 **Other**（Vercel 会自动识别 Python + requirements.txt）
-3. 直接 **Deploy**（`vercel.json` 已配置函数超时 `maxDuration: 300` 与路由重写）
+2. Framework Preset 选 **Other** 即可（Vercel 会自动识别 Python / FastAPI 框架）
+3. 直接 **Deploy**（`vercel.json` 仅配置函数超时 `maxDuration: 300`）
+   ⚠️ 不要添加 `rewrites` 路由重写：Vercel 的 FastAPI 框架路由会按原始路径转发请求，
+      若在 vercel.json 里配置 `"rewrites": [{"source": "/(.*)", "destination":
+      "/api/index.py"}]`，应用收到的路径会变成 `/api/index.py` 而非原始路径，
+      导致全部路由 404 `{"detail":"Not Found"}`。
 4. 也可用 CLI：`npm i -g vercel && vercel --prod`
 
 > 提示：Vercel Hobby 计划函数最长 300s，处理大区域可能超时，前端已限制 BBOX ≤ 5°×5°。
