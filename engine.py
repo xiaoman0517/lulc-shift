@@ -25,10 +25,26 @@ import time
 # 原因：Serverless（如 Vercel）环境中，模块加载阶段导入重型二进制库可能导致函数
 # 启动崩溃（FUNCTION_INVOCATION_FAILED）。按需导入可保证首页与诊断接口始终可用。
 
+_EXPAT_LOADED = False
+
 
 def _ensure_proj_env():
-    """确保 PROJ 使用 rasterio 自带的数据库（避免被 PostgreSQL 等第三方改写到旧版本目录）。
-    用 find_spec 定位 rasterio 而不实际导入，保证可在导入 rasterio 之前设置环境变量。"""
+    """确保 PROJ 使用 rasterio 自带的数据库（避免被 PostgreSQL 等第三方改写到旧版本目录），
+    并预加载捆绑的 libexpat（Vercel 等 Serverless 运行时缺少系统库 libexpat.so.1，
+    导致导入 rasterio 时 GDAL 找不到该依赖而崩溃）。"""
+    global _EXPAT_LOADED
+    # 仅 Linux 需要；Windows 上无此文件，自动跳过
+    if not _EXPAT_LOADED and sys.platform.startswith("linux"):
+        _EXPAT_LOADED = True
+        try:
+            import ctypes
+            _exp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib", "libexpat.so.1")
+            if os.path.exists(_exp):
+                # RTLD_GLOBAL 让符号进入全局表，rasterio 的 GDAL 才能复用
+                ctypes.CDLL(_exp, mode=getattr(os, "RTLD_GLOBAL", 1))
+        except Exception:  # noqa: BLE001
+            pass
+
     import importlib.util
     _spec = importlib.util.find_spec("rasterio")
     if _spec and _spec.origin:
