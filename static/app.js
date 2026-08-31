@@ -367,8 +367,24 @@
       tbody.appendChild(tr);
     });
 
+    renderChangeLegend(result.top_transitions || []);
     buildResultLayers();
     showPanel("result-panel");
+  }
+
+  // 变化类型图例：颜色与瓦片渲染一致（TAB20[code % 20]）
+  function renderChangeLegend(transitions) {
+    const el = document.getElementById("change-legend");
+    if (!el) return;
+    el.innerHTML = transitions.map((t) =>
+      `<div class="item"><span class="swatch" style="background:${TAB20[t.code % TAB20.length]}"></span>` +
+      `${t.code} · ${t.transition}</div>`
+    ).join("");
+  }
+
+  function showChangeLegend(show) {
+    const block = document.getElementById("change-legend-block");
+    if (block) block.hidden = !show;
   }
 
   function buildResultLayers() {
@@ -408,10 +424,10 @@
       window.layerControl.remove();
     }
     window.layerControl = L.control.layers(baseMaps, overlayMaps, { collapsed: false }).addTo(map);
-    // 图层互斥：分类（before/after） 与 变化栅格 / 变化矢量 三组之间单选。
-    // overlayadd 是地图事件（由 layers control 添加 overlay 时触发），绑定在 map 上。
-    map.off("overlayadd", handleOverlayAdd);
-    map.on("overlayadd", handleOverlayAdd);
+    // 图层互斥：分类（before/after） 与 变化栅格 两组之间单选。
+    // 用 map 的标准 layeradd 事件（任何图层被添加时触发），比 overlayadd 更可靠。
+    map.off("layeradd", handleOverlayAdd);
+    map.on("layeradd", handleOverlayAdd);
 
     // 默认显示变化前分类（卷帘开启时再叠加变化后分类）
     layers.before.addTo(map);
@@ -432,7 +448,8 @@
 
   function handleOverlayAdd(e) {
     if (suppressingExclusive) return;
-    const group = overlayGroup(e.layer);
+    const layer = e.layer;
+    const group = overlayGroup(layer);
     if (!group) return;
     // 图层面板操作时先退出卷帘（卷帘是独立的"前后分类对比"模式）
     if (swipeEnabled) toggleSwipe();
@@ -444,10 +461,23 @@
     }
     removeList.forEach((l) => {
       if (l && map.hasLayer(l)) {
-        // 只移除图层（图层面板选项保留，checkbox 自动取消勾选）
+        // 只移除图层（图层面板选项保留）
         map.removeLayer(l);
       }
     });
+    // 手动同步图层面板勾选状态（L.Control.Layers 在用户点击处理期间可能不刷新）
+    if (group === "class") {
+      setLayerCheckbox("变化栅格", false);
+    } else if (group === "raster") {
+      setLayerCheckbox("before", false);
+      setLayerCheckbox("after", false);
+    }
+    // 点击变化栅格时显示变化类型图例
+    if (group === "raster") {
+      showChangeLegend(true);
+    } else {
+      showChangeLegend(false);
+    }
   }
 
   // ---- 卷帘对比（before / after）----
