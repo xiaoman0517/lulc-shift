@@ -10,8 +10,12 @@ change_map.tif.aux.xml
 change_map.geojson
 change_map_analysis.png
 *.tmp
-# 测试产物
+# 测试/本地服务产物
 test_output.*
 server.log
 server.err
+server.pid
+server_redis.log
+server_redis.err
+server_redis.pid
 .vercel

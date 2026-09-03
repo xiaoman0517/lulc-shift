@@ -285,6 +285,8 @@
   // ---- 任务流程 ----
   let pollTimer = null;
   let currentJobId = null;
+  let polling = false;      // 防止上一次轮询未返回时重复发起（Serverless 接管执行时单次轮询可能很慢）
+  let pollFailures = 0;     // 连续失败次数：Serverless 实例可能因函数时长上限被回收，需自动重试
 
   document.getElementById("submit-btn").addEventListener("click", async () => {
     const bbox = readBbox();
@@ -298,6 +300,7 @@
     hidePanel("result-panel");
     setProgress(0, "提交任务...");
     clearLogs();
+    pollFailures = 0;
 
     try {
       const resp = await fetch(API.createJob, {
@@ -317,11 +320,14 @@
   });
 
   async function poll() {
-    if (!currentJobId) return;
+    if (!currentJobId || polling) return;
+    polling = true;
     try {
       const resp = await fetch(API.job(currentJobId));
-      if (!resp.ok) throw new Error("任务不存在或服务已重启");
+      if (resp.status === 404) throw new Error("任务不存在或已过期");
+      if (!resp.ok) throw new Error(`服务暂时不可用（HTTP ${resp.status}）`);
       const job = await resp.json();
+      pollFailures = 0;
       setProgress(job.percent || 0, "");
       renderLogs(job.logs);
       if (job.status === "done") {
@@ -336,10 +342,25 @@
         setBtnLoading(false);
       }
     } catch (err) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-      showError(err.message);
-      setBtnLoading(false);
+      // Serverless 环境中，接管执行的任务可能超过单次函数时长上限导致本次轮询
+      // 请求失败（504/网络错误）。任务状态已持久化到 Redis，继续轮询即可，
+      // 只有连续多次失败才认为后端真的不可用。
+      pollFailures++;
+      const box = document.getElementById("log-box");
+      if (box) {
+        const div = document.createElement("div");
+        div.className = "warn";
+        div.textContent = `⚠ ${err.message}（第 ${pollFailures} 次失败，正在自动重试…）`;
+        box.appendChild(div);
+      }
+      if (pollFailures >= 20) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        showError(err.message);
+        setBtnLoading(false);
+      }
+    } finally {
+      polling = false;
     }
   }
 

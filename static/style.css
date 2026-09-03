@@ -166,6 +166,7 @@ body {
 #log-box::-webkit-scrollbar { width: 5px; }
 #log-box::-webkit-scrollbar-thumb { background: #2c4a57; border-radius: 3px; }
 #log-box .err { color: #ff9d8a; }
+#log-box .warn { color: #f4d27a; }
 
 /* ---------- 结果 ---------- */
 #result-summary { font-size: 13px; line-height: 1.85; color: var(--ink); }

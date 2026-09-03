@@ -5,3 +5,7 @@ planetary-computer>=1.0
 rasterio>=1.3
 numpy>=1.24
 shapely>=2.0
+requests>=2.31
+# Vercel Serverless 持久化：任务状态 -> Upstash Redis；结果文件 -> Vercel Blob
+upstash-redis>=1.8.0
+vercel-blob>=0.4.2
