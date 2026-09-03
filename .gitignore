@@ -19,3 +19,4 @@ server_redis.log
 server_redis.err
 server_redis.pid
 .vercel
+.env*

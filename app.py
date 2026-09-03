@@ -28,8 +28,10 @@ Vercel 部署：
     存储模式，按环境变量自动切换：
 
       1) Serverless 模式（部署到 Vercel 时，推荐）：
-         - 任务状态  -> Upstash Redis（环境变量 UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN）
-         - 结果文件  -> Vercel Blob（环境变量 BLOB_READ_WRITE_TOKEN）
+         - 任务状态  -> Redis，兼容两套环境变量（同构，任选其一即可）：
+             a) Upstash 原生 UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN
+             b) Vercel KV（Vercel Storage -> KV 集成自动注入）KV_REST_API_URL / KV_REST_API_TOKEN
+         - 结果文件  -> Vercel Blob（环境变量 BLOB_READ_WRITE_TOKEN，Vercel Storage -> Blob 自动注入）
          - 不启动后台线程（Vercel 会在响应返回后冻结实例）；GET /api/jobs/{id}
            轮询时若发现任务长时间没有进度更新，就在该请求内"接管"继续执行，
            直到完成或被函数时长上限打断（下次轮询会再次接管；重复执行幂等，
@@ -115,13 +117,19 @@ _redis_client = None
 _redis_error = None
 _use_redis = False
 
+# Redis REST 环境变量两套命名等价（底层都是 Upstash Redis）：
+#   a) Upstash 集成/手动配置：UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN
+#   b) Vercel KV（Vercel Storage -> KV 自动注入）：KV_REST_API_URL / KV_REST_API_TOKEN
+_REDIS_URL_ENVS = ("UPSTASH_REDIS_REST_URL", "KV_REST_API_URL")
+_REDIS_TOKEN_ENVS = ("UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_TOKEN")
+
 
 def get_redis():
-    """懒加载 Upstash Redis 客户端；只有两个环境变量都配置时才启用 Redis 模式。"""
+    """懒加载 Redis 客户端；只要任一命名下的 URL+Token 都配置了就启用 Redis 模式。"""
     global _redis_client, _redis_error, _use_redis
     if _redis_client is None and _redis_error is None:
-        url = os.environ.get("UPSTASH_REDIS_REST_URL", "").strip()
-        token = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "").strip()
+        url = next((os.environ.get(k, "").strip() for k in _REDIS_URL_ENVS if os.environ.get(k, "").strip()), "")
+        token = next((os.environ.get(k, "").strip() for k in _REDIS_TOKEN_ENVS if os.environ.get(k, "").strip()), "")
         if url and token:
             try:
                 from upstash_redis import Redis
@@ -130,7 +138,11 @@ def get_redis():
             except Exception as exc:  # noqa: BLE001
                 _redis_error = f"{type(exc).__name__}: {exc}"
         else:
-            _redis_error = "UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN 未配置"
+            _redis_error = (
+                "未检测到 Redis 环境变量（需同时配置 URL+Token）："
+                f"{_REDIS_URL_ENVS[0]}/{_REDIS_TOKEN_ENVS[0]} 或 Vercel KV 的 "
+                f"{_REDIS_URL_ENVS[1]}/{_REDIS_TOKEN_ENVS[1]}"
+            )
     return _redis_client if _use_redis else None
 
 
@@ -384,6 +396,8 @@ def diag():
                 k for k in (
                     "UPSTASH_REDIS_REST_URL",
                     "UPSTASH_REDIS_REST_TOKEN",
+                    "KV_REST_API_URL",
+                    "KV_REST_API_TOKEN",
                     "BLOB_READ_WRITE_TOKEN",
                 ) if os.environ.get(k)
             ),
@@ -440,7 +454,8 @@ def create_job(req: JobRequest):
     if not _save_job(job):
         raise HTTPException(
             status_code=500,
-            detail="任务状态写入失败：请检查 UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN 环境变量是否配置正确",
+            detail="任务状态写入失败：请检查 Redis 环境变量是否配置正确"
+            "(UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN 或 Vercel KV 的 KV_REST_API_URL/KV_REST_API_TOKEN)",
         )
     if not _use_redis:
         # 本地模式：后台线程执行，保持原有"创建 -> 轮询"体验

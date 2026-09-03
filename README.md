@@ -111,6 +111,8 @@ Vercel 函数是无状态、按请求隔离、实例短暂的环境。本地运�
      地域选离你最近的，如新加坡）
    - 或直接在 Vercel 项目 **Storage → Create Database → Upstash Redis** 创建并关联
    - 会生成两个环境变量：`UPSTASH_REDIS_REST_URL`、`UPSTASH_REDIS_REST_TOKEN`
+   - 若在 **Storage → Create Database → KV (Redis by Upstash)** 创建，注入的是 Vercel KV
+     命名的 `KV_REST_API_URL`、`KV_REST_API_TOKEN`——与上面一套完全同构，代码两种命名都已兼容，无需改名
 
 2. **Vercel Blob（存结果文件 before/after/change_map.tif + geojson + zip）**
    - Vercel 项目 **Storage → Create Database → Blob**，Access 选 **Public**
@@ -154,7 +156,7 @@ GitHub 连接不畅时，把仓库推到 GitLab / Bitbucket / Gitee，
 **对 Python Serverless 函数支持有限，本项目不建议使用**。
 
 > 无论用哪种方式，部署后都需要配置「第 3 节」的两个存储环境变量
-> （`UPSTASH_REDIS_REST_URL/TOKEN` + `BLOB_READ_WRITE_TOKEN`）；数据本身来自
+> （`UPSTASH_REDIS_REST_URL/TOKEN` 或 Vercel KV 的 `KV_REST_API_URL/TOKEN` + `BLOB_READ_WRITE_TOKEN`）；数据本身来自
 > Planetary Computer 公开 STAC API（匿名签名），`io-lulc-9-class` 为公开数据，
 > 无需任何密钥即可拉取。
 

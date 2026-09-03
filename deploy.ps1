@@ -44,4 +44,4 @@ if ($cli.EndsWith(".js")) {
 }
 
 Write-Host ""
-Write-Host "部署完成。访问：https://land-cover-analysis.vercel.app" -ForegroundColor Green
+Write-Host "部署完成。访问：https://lulc-shift.vercel.app （可用 /api/diag 查看存储后端）" -ForegroundColor Green
