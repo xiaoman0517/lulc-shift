@@ -142,9 +142,15 @@ def _pick_item(items, bbox):
 
 
 def fetch_lulc_array(catalog, bbox, date_range, progress=None):
-    """搜索 + 裁剪读取一个时相的分类影像，返回 (数组, transform, crs, profile, item_id)"""
+    """搜索 + 裁剪读取一个时相的分类影像，返回 (数组, transform, crs, profile, item_id)。
+
+    若 BBOX 同时命中多景（常见于跨 UTM 瓦片边界，如深圳 113.9~114.0E 正好跨 114E），
+    会把命中的每一景都裁剪出来，并以"数据最多的一景"的网格为基准做最近邻拼接，
+    避免只取中心所在景导致大片区域读成 nodata（表现为前端栅格几乎全空白）。
+    """
     import rasterio
-    from rasterio.warp import transform_bounds
+    from rasterio.warp import transform_bounds, reproject, Resampling
+    import numpy as np
     import planetary_computer as pc
 
     search = catalog.search(
@@ -156,25 +162,70 @@ def fetch_lulc_array(catalog, bbox, date_range, progress=None):
     if not items:
         raise RuntimeError(f"在 {date_range} 范围内没搜到任何 {COLLECTION} 数据，检查 BBOX 或日期范围")
 
-    item = pc.sign(_pick_item(items, bbox))
-    asset_href = item.assets["data"].href
+    # 只保留目标年份的景：io-lulc 相邻年份的 item 其 datetime 区间可能与查询区间
+    # 重叠而被 STAC 一起返回，混入其它年份会污染对比结果（按 id 中的年份过滤）
+    year = date_range[:4]
+    filtered = [i for i in items if str(year) in i.id]
+    if filtered:
+        items = filtered
+    # 去重（同一景可能被多次返回）
+    uniq, seen = [], set()
+    for it in items:
+        if it.id not in seen:
+            seen.add(it.id)
+            uniq.append(it)
+    items = uniq
+
+    chunks = []  # (arr, window_transform, crs, profile, item_id)
+    for item in items:
+        try:
+            signed = pc.sign(item)
+            with rasterio.open(signed.assets["data"].href) as src:
+                # io-lulc 的 COG 是 UTM 投影（米），bbox 是经纬度，先转换到栅格坐标系再裁剪
+                dst_bounds = transform_bounds("EPSG:4326", src.crs, *bbox)
+                window = rasterio.windows.from_bounds(*dst_bounds, transform=src.transform)
+                window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
+                if window.width <= 0 or window.height <= 0:
+                    continue
+                arr = src.read(1, window=window)
+                transform = src.window_transform(window)
+                crs = src.crs
+                profile = src.profile.copy()
+        except Exception as exc:  # noqa: BLE001  单景读取失败跳过（其它景通常可覆盖）
+            print(f"[engine] 读取 {item.id} 失败：{exc}", file=sys.stderr)
+            continue
+        chunks.append((arr, transform, crs, profile, item.id))
+
+    if not chunks:
+        raise RuntimeError(f"在 {date_range} 范围内没有任何可读取的 {COLLECTION} 影像，检查 BBOX 是否在数据覆盖范围内")
+
+    if len(chunks) == 1:
+        arr, transform, crs, profile, item_id = chunks[0]
+    else:
+        # 基准网格取数据最多的一景（避免基准选到只剩 nodata 边距的景）
+        ref_idx = max(range(len(chunks)), key=lambda k: int((chunks[k][0] > 0).sum()))
+        ref_arr, ref_t, ref_crs, ref_prof, ref_id = chunks[ref_idx]
+        combined = ref_arr.copy()
+        used = [ref_id]
+        for k, (o_arr, o_t, o_crs, _p, o_id) in enumerate(chunks):
+            if k == ref_idx or int((o_arr > 0).sum()) == 0:
+                continue
+            buf = np.zeros_like(combined)
+            reproject(
+                source=o_arr, destination=buf,
+                src_transform=o_t, src_crs=o_crs,
+                dst_transform=ref_t, dst_crs=ref_crs,
+                resampling=Resampling.nearest,
+            )
+            # 分类图 nodata=0：只在基准图空洞处填入其它景的数据，避免重叠区冲突
+            combined = np.where(combined != 0, combined, buf)
+            used.append(o_id)
+        arr, transform, crs, profile, item_id = combined, ref_t, ref_crs, ref_prof, "+".join(used)
 
     if progress:
-        progress.update(progress.percent, f"读取分类影像 {item.id} ...")
+        progress.update(progress.percent, f"读取分类影像 {item_id} ...")
 
-    with rasterio.open(asset_href) as src:
-        # io-lulc 的 COG 是 UTM 投影（米），bbox 是经纬度，先转换到栅格坐标系再裁剪
-        dst_bounds = transform_bounds("EPSG:4326", src.crs, *bbox)
-        window = rasterio.windows.from_bounds(*dst_bounds, transform=src.transform)
-        window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
-        if window.width <= 0 or window.height <= 0:
-            raise RuntimeError("裁剪窗口为空，请检查 BBOX 是否在数据覆盖范围内")
-        arr = src.read(1, window=window)
-        transform = src.window_transform(window)
-        crs = src.crs
-        profile = src.profile.copy()
-
-    return arr, transform, crs, profile, item.id
+    return arr, transform, crs, profile, item_id
 
 
 def align_to_reference(arr, src_transform, src_crs, ref_arr, ref_transform, ref_crs):
