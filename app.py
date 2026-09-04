@@ -184,6 +184,56 @@ def _blob_enabled():
     return bool(os.environ.get("BLOB_READ_WRITE_TOKEN", "").strip())
 
 
+# 预览图 key：Redis 模式下单值有大小上限（Upstash 约 1MB），三幅整幅 PNG 的
+# base64 可能超限，因此 Redis 模式下每层单独存一个 key（24h TTL），本地模式
+# 则直接嵌在任务 dict 里随轮询返回。
+def _preview_key(job_id, layer):
+    return f"lulc:job:{job_id}:preview:{layer}"
+
+
+def _save_previews(job, previews):
+    """保存三幅预览 PNG。返回可直接随任务状态返回的 {layer: {...}} 字典。
+
+    - 无 Redis：直接放 job dict，随 GET /api/jobs 轮询一起返回；
+    - 有 Redis：逐层写入独立 key（避免超单值上限），GET 时再懒加载拼回。
+    """
+    if not previews:
+        return {}
+    r = get_redis()
+    if r:
+        try:
+            for layer, p in previews.items():
+                r.set(_preview_key(job["job_id"], layer), json.dumps(p), ex=JOB_TTL)
+            return {}
+        except Exception as exc:  # noqa: BLE001
+            print(f"[storage] Redis 预览图写入失败: {exc}", file=sys.stderr)
+            return {}
+    job["preview"] = previews
+    return previews
+
+
+def _load_previews(job):
+    """Redis 模式下懒加载预览图（本地模式预览已嵌在 job dict，直接返回）。"""
+    if job.get("preview"):
+        return job["preview"]
+    r = get_redis()
+    if not r:
+        return {}
+    out = {}
+    for layer in ("before", "after", "change"):
+        try:
+            raw = r.get(_preview_key(job["job_id"], layer))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[storage] Redis 预览图读取失败: {exc}", file=sys.stderr)
+            continue
+        if raw:
+            try:
+                out[layer] = json.loads(raw)
+            except ValueError:
+                pass
+    return out
+
+
 def _download_url(url):
     """给 Blob 公开 URL 追加 ?download=1，强制浏览器以附件方式下载。"""
     sep = "&" if "?" in url else "?"
@@ -333,6 +383,27 @@ def _run_job(job_id):
             "before": os.path.join(workdir, result["files"]["before_tif"]),
             "after": os.path.join(workdir, result["files"]["after_tif"]),
         }
+        # 预览图：趁本地文件还在（上传/清理之前），把三幅栅格整图渲染成 PNG 随任务
+        # 状态返回。Serverless 无共享存储时前端展示不依赖逐瓦片请求，绕开“结果文件只
+        # 存在于某台实例 /tmp”导致的地图空白。blob 模式文件已入对象存储、瓦片跨实例
+        # 可用，无需预览（也避免撑大 Redis 记录）。
+        if job.get("storage") != "blob":
+            import base64
+            previews = {}
+            for _key, _path, _kind in (
+                ("before", local_files["before"], "class"),
+                ("after", local_files["after"], "class"),
+                ("change", local_files["tif"], "change"),
+            ):
+                try:
+                    png, _bounds = eng.render_preview(_path, kind=_kind, max_side=1536)
+                    previews[_key] = {
+                        "data": "data:image/png;base64," + base64.b64encode(png).decode("ascii"),
+                        "bounds": _bounds,
+                    }
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[preview] 渲染 {_key} 预览失败: {exc}", file=sys.stderr)
+            _save_previews(job, previews)
         if job.get("storage") == "blob":
             urls = _upload_results(job_id, local_files)
             urls["change"] = urls["tif"]  # 瓦片 layer=change 复用变化栅格
@@ -489,6 +560,7 @@ def get_job(job_id: str):
         "logs": job["logs"],
         "error": job["error"],
         "result": job["result"],
+        "preview": _load_previews(job) or None,
     }
 
 

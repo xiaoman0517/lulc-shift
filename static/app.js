@@ -333,7 +333,7 @@
       if (job.status === "done") {
         clearInterval(pollTimer);
         pollTimer = null;
-        renderResult(job.result);
+        renderResult(job.result, job.preview || null);
         setBtnLoading(false);
       } else if (job.status === "error") {
         clearInterval(pollTimer);
@@ -366,8 +366,13 @@
 
   // ---- 结果渲染 ----
   let layers = { before: null, after: null, change: null, geojson: null };
+  // Serverless 本地模式无共享存储时，后端会把三幅结果栅格渲染成整幅
+  // 预览 PNG（data URL）随最后一次轮询返回，前端直接 ImageOverlay 上地图；
+  // 这样地图展示不再依赖逐瓦片请求，绕开跨实例文件 404。
+  let currentPreview = null;
 
-  function renderResult(result) {
+  function renderResult(result, preview) {
+    currentPreview = preview || null;
     document.getElementById("result-summary").innerHTML =
       `<p>对比分类数据：<b>${result.before_item}</b> → <b>${result.after_item}</b>（${result.width}×${result.height} 像素，` +
       `${result.pixel_area_m2} m²/像素，CRS ${result.crs}）</p>` +
@@ -408,6 +413,21 @@
     if (block) block.hidden = !show;
   }
 
+  // 创建一个结果图层：优先用后端内嵌的整幅预览 PNG（ImageOverlay），
+  // 没有预览（如 KV/Blob 模式）时回退到逐瓦片请求。
+  function makeResultLayer(key, opacity) {
+    if (currentPreview && currentPreview[key]) {
+      const p = currentPreview[key];
+      const b = p.bounds; // [west, south, east, north]
+      return L.imageOverlay(
+        p.data,
+        L.latLngBounds([b[1], b[0]], [b[3], b[2]]),
+        { opacity: opacity, interactive: false }
+      );
+    }
+    return L.tileLayer(API.tiles(currentJobId, key), { maxZoom: 17, opacity });
+  }
+
   function buildResultLayers() {
     // 移除旧图层（重新分析时）
     Object.values(layers).forEach((l) => {
@@ -417,21 +437,13 @@
     });
     layers = { before: null, after: null, afterTop: null, change: null, geojson: null };
 
-    layers.before = L.tileLayer(API.tiles(currentJobId, "before"), {
-      maxZoom: 17, opacity: 0.95,
-    });
+    layers.before = makeResultLayer("before", 0.95);
     // 底层 after：用于图层面板单独查看"变化后分类"
-    layers.after = L.tileLayer(API.tiles(currentJobId, "after"), {
-      maxZoom: 17, opacity: 0.95,
-    });
+    layers.after = makeResultLayer("after", 0.95);
     // 上层 after：卷帘对比专用（覆盖在底层地图之上，由 clip-path 控制显隐）
-    layers.afterTop = L.tileLayer(API.tiles(currentJobId, "after"), {
-      maxZoom: 17, opacity: 0.95,
-    });
+    layers.afterTop = makeResultLayer("after", 0.95);
     layers.afterTop.addTo(mapTop);
-    layers.change = L.tileLayer(API.tiles(currentJobId, "change"), {
-      maxZoom: 17, opacity: 0.85,
-    });
+    layers.change = makeResultLayer("change", 0.85);
 
     const overlayMaps = {
       "🖼 变化前分类（before）": layers.before,

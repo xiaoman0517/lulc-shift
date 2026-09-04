@@ -377,6 +377,51 @@ def _empty_png(tile_size=256):
     return out.getvalue()
 
 
+def render_preview(tif_path, kind="class", max_side=1024):
+    """把整幅 GeoTIFF 降采样渲染成一张单图 PNG，并返回其 WGS84 地理范围。
+
+    用途：Serverless 无共享存储时，任务结果 tif 只存在于执行实例的 /tmp。
+    与其让前端逐瓦片请求（会打到别的实例而失败），不如在任务完成时直接把
+    整幅结果渲染成一张小 PNG、以 data URL 随任务状态一起返回，前端用
+    L.imageOverlay 平铺到地图上即可。
+
+    返回 (png_bytes, bounds)，bounds=[west, south, east, north]（EPSG:4326）。
+    kind="class" 用 CLASS_COLORS 渲染，"change" 用 Tab20 渲染；nodata 透明。
+    """
+    _ensure_proj_env()
+
+    import numpy as np
+    import rasterio
+    from rasterio.warp import transform_bounds, Resampling
+    from PIL import Image
+
+    with rasterio.open(tif_path) as src:
+        w, h = src.width, src.height
+        scale = min(1.0, max_side / max(w, h))
+        out_w = max(1, int(round(w * scale)))
+        out_h = max(1, int(round(h * scale)))
+        arr = src.read(
+            1, out_shape=(out_h, out_w), resampling=Resampling.nearest,
+        ).astype(np.int16)
+        west, south, east, north = transform_bounds(src.crs, "EPSG:4326", *src.bounds)
+
+    img = np.zeros((out_h, out_w, 4), dtype=np.uint8)
+    if kind == "change":
+        for code in np.unique(arr):
+            if code == 0 or code == NODATA:
+                continue
+            img[arr == code] = (*change_color_for_code(int(code)), 255)
+    else:
+        for cls, color in CLASS_COLORS.items():
+            m = arr == cls
+            if m.any():
+                img[m] = (*color, 255)
+
+    out = io.BytesIO()
+    Image.fromarray(img, "RGBA").save(out, format="PNG")
+    return out.getvalue(), [float(west), float(south), float(east), float(north)]
+
+
 def write_geojson(change_code, transform, crs, path):
     """把变化栅格转矢量 GeoJSON，属性表带 from/to/transition/面积（UTM 米制）"""
     from rasterio.features import shapes as rio_shapes
