@@ -323,30 +323,138 @@ def _build_zip_bytes(local_files):
     return buffer.getvalue()
 
 
+_BLOB_API = "https://blob.vercel-storage.com"
+_BLOB_CHUNK = 5 * 1024 * 1024  # multipart 分片大小（与官方 SDK 一致）
+
+
+def _blob_mime(pathname):
+    """按文件名推断 Content-Type（Blob 上传需要）。"""
+    name = pathname.lower()
+    if name.endswith((".tif", ".tiff")):
+        return "image/tiff"
+    if name.endswith(".geojson") or name.endswith(".json"):
+        return "application/geo+json"
+    if name.endswith(".zip"):
+        return "application/zip"
+    return "application/octet-stream"
+
+
+def _blob_put(pathname, data):
+    """用 requests 直连 Vercel Blob REST API 上传，返回可公开访问的 URL。
+
+    为什么不用 vercel_blob 官方包：Vercel 新版 Python 运行时会对超大依赖包做裁剪，
+    该包在函数里会 ModuleNotFoundError。这里直接用 requests（与 STAC 拉取/瓦片下载
+    同一条链路），不依赖任何三方 SDK。
+
+    小文件单次 PUT；超过一个分片（5MB）走 multipart（create -> upload parts -> complete），
+    multipart 失败时退回单次 PUT 兜底。
+    """
+    import requests
+    import uuid as _uuid
+
+    token = os.environ.get("BLOB_READ_WRITE_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError("BLOB_READ_WRITE_TOKEN 未配置")
+
+    base_headers = {
+        "access": "public",
+        "authorization": f"Bearer {token}",
+        "x-api-version": "10",
+        "x-content-type": _blob_mime(pathname),
+        "x-cache-control-max-age": "31536000",
+        "x-add-random-suffix": "1",
+        "x-allow-overwrite": "1",
+    }
+    params = {"pathname": pathname}
+
+    def _json(resp):
+        resp.raise_for_status()
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Blob 响应非 JSON（HTTP {resp.status_code}）：{resp.text[:200]}"
+            ) from exc
+
+    def _single_put():
+        resp = requests.put(
+            f"{_BLOB_API}/", params=params, headers=base_headers, data=data, timeout=300
+        )
+        info = _json(resp)
+        return info.get("url") or info.get("downloadUrl") or ""
+
+    if len(data) <= _BLOB_CHUNK:
+        return _single_put()
+
+    def _mpu_headers(action, extra=None):
+        h = dict(base_headers)
+        h["x-mpu-action"] = action
+        h["x-api-blob-request-attempt"] = "0"
+        h["x-api-blob-request-id"] = str(_uuid.uuid4())
+        if extra:
+            h.update(extra)
+        return h
+
+    try:
+        created = _json(
+            requests.post(
+                f"{_BLOB_API}/mpu", params=params,
+                headers=_mpu_headers("create"), timeout=120,
+            )
+        )
+        upload_id = created.get("uploadId")
+        key = created.get("key")
+        if not upload_id or not key:
+            raise RuntimeError(f"创建 multipart 上传失败：{created}")
+
+        parts = []
+        for offset in range(0, len(data), _BLOB_CHUNK):
+            part_number = offset // _BLOB_CHUNK + 1
+            chunk = data[offset:offset + _BLOB_CHUNK]
+            resp = requests.post(
+                f"{_BLOB_API}/mpu", params=params,
+                headers=_mpu_headers("upload", {
+                    "x-mpu-upload-id": upload_id,
+                    "x-mpu-key": requests.utils.quote(key),
+                    "x-mpu-part-number": str(part_number),
+                    "Content-Type": "application/octet-stream",
+                }),
+                data=chunk, timeout=300,
+            )
+            etag = resp.headers.get("etag")
+            if not etag:
+                body = _json(resp)
+                etag = body.get("etag") if isinstance(body, dict) else None
+            if not etag:
+                raise RuntimeError(f"分片 {part_number} 未返回 etag")
+            parts.append({"partNumber": part_number, "etag": etag})
+
+        done = _json(
+            requests.post(
+                f"{_BLOB_API}/mpu", params=params,
+                headers=_mpu_headers("complete", {
+                    "x-mpu-upload-id": upload_id,
+                    "x-mpu-key": requests.utils.quote(key),
+                    "Content-Type": "application/json",
+                }),
+                json=parts, timeout=300,
+            )
+        )
+        return done.get("url") or done.get("downloadUrl") or ""
+    except Exception as exc:  # noqa: BLE001
+        print(f"[blob] multipart 上传失败，改用单次 PUT 兜底: {exc}", file=sys.stderr)
+        return _single_put()
+
+
 def _upload_results(job_id, local_files):
     """把本地结果文件上传到 Vercel Blob（公开读），返回 {key: blob url}，并额外上传打包 zip。"""
-    import vercel_blob
-
-    def put_one(pathname, data, multipart):
-        resp = vercel_blob.put(
-            pathname,
-            data,
-            {"addRandomSuffix": True, "allowOverwrite": True},
-            multipart=multipart,
-            timeout=300,  # 大文件上传需要更长超时（默认 10s 不够）
-        )
-        return resp.get("url") or resp.get("downloadUrl") or ""
-
     urls = {}
     for key, path in local_files.items():
         with open(path, "rb") as f:
             data = f.read()
-        pathname = f"{job_id}/{os.path.basename(path)}"
-        urls[key] = put_one(pathname, data, len(data) > 8 * 1024 * 1024)
+        urls[key] = _blob_put(f"{job_id}/{os.path.basename(path)}", data)
     zip_bytes = _build_zip_bytes(local_files)
-    urls["zip"] = put_one(
-        f"{job_id}/land_cover_change.zip", zip_bytes, len(zip_bytes) > 8 * 1024 * 1024
-    )
+    urls["zip"] = _blob_put(f"{job_id}/land_cover_change.zip", zip_bytes)
     return urls
 
 

@@ -7,6 +7,4 @@ numpy>=1.24
 shapely>=2.0
 pillow>=9.0
 requests>=2.31
-# Vercel Serverless 持久化：任务状态 -> Upstash Redis；结果文件 -> Vercel Blob
-upstash-redis>=1.8.0
-vercel-blob>=0.4.2
+# Redis / Vercel Blob 均通过 requests 直连 REST API 实现，无需额外 SDK
