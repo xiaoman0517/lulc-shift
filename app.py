@@ -116,6 +116,9 @@ STALE_AFTER = 30
 _redis_client = None
 _redis_error = None
 _use_redis = False
+# 运行期 Redis 操作失败（如数据库被删除）后置为 True：本实例内降级为内存模式，
+# 避免每个请求都重复失败、也让页面能继续用。
+_redis_failed = False
 
 # Redis REST 环境变量两套命名等价（底层都是 Upstash Redis）：
 #   a) Upstash 集成/手动配置：UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN
@@ -139,8 +142,8 @@ class _RestRedis:
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {token}"})
 
-    def _execute(self, *command):
-        resp = self._session.post(self._url, json=list(command), timeout=15)
+    def _execute(self, *command, timeout=15):
+        resp = self._session.post(self._url, json=list(command), timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
         if isinstance(data, dict) and data.get("error"):
@@ -156,8 +159,8 @@ class _RestRedis:
     def get(self, key):
         return self._execute("GET", key)
 
-    def ping(self):
-        return self._execute("PING")
+    def ping(self, timeout=3):
+        return self._execute("PING", timeout=timeout)
 
 
 def get_redis():
@@ -168,10 +171,15 @@ def get_redis():
         token = next((os.environ.get(k, "").strip() for k in _REDIS_TOKEN_ENVS if os.environ.get(k, "").strip()), "")
         if url and token:
             try:
-                _redis_client = _RestRedis(url, token)
+                client = _RestRedis(url, token)
+                # 健康检查：URL/Token 可能指向已被删除的数据库（DNS NXDOMAIN），
+                # 提前探测可避免直到创建任务时才 500。失败则降级为内存模式。
+                client.ping(timeout=3)
+                _redis_client = client
                 _use_redis = True
             except Exception as exc:  # noqa: BLE001
                 _redis_error = f"{type(exc).__name__}: {exc}"
+                print(f"[storage] Redis 不可用，已降级为内存模式：{_redis_error}", file=sys.stderr)
         else:
             _redis_error = (
                 "未检测到 Redis 环境变量（需同时配置 URL+Token）："
@@ -193,11 +201,13 @@ def _save_job(job):
             r.set(_job_key(job["job_id"]), json.dumps(job, ensure_ascii=False), ex=JOB_TTL)
             return True
         except Exception as exc:  # noqa: BLE001
-            import traceback
-
-            print(f"[storage] Redis 写入失败: {exc}", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
-            return False
+            # 运行期 Redis 失效（数据库被删/网络故障）：降级为内存表，保证本次请求可用
+            global _redis_failed
+            _redis_failed = True
+            _use_redis = False
+            print(f"[storage] Redis 写入失败，降级为内存模式: {exc}", file=sys.stderr)
+            JOBS[job["job_id"]] = job
+            return True
     JOBS[job["job_id"]] = job
     return True
 
@@ -212,8 +222,10 @@ def _load_job(job_id):
                 return None
             return json.loads(raw)
         except Exception as exc:  # noqa: BLE001
-            print(f"[storage] Redis 读取失败: {exc}", file=sys.stderr)
-            return None
+            global _redis_failed
+            _redis_failed = True
+            _use_redis = False
+            print(f"[storage] Redis 读取失败，降级为内存模式: {exc}", file=sys.stderr)
     return JOBS.get(job_id)
 
 
@@ -504,6 +516,7 @@ def diag(selftest: int = 0):
         "storage": {
             "mode": storage_mode,
             "redis": bool(_use_redis),
+            "redis_error": _redis_error,
             "blob": bool(_blob_enabled()),
             "env_set": sorted(
                 k for k in (
