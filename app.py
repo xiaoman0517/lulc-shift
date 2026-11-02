@@ -124,6 +124,42 @@ _REDIS_URL_ENVS = ("UPSTASH_REDIS_REST_URL", "KV_REST_API_URL")
 _REDIS_TOKEN_ENVS = ("UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_TOKEN")
 
 
+class _RestRedis:
+    """基于 Upstash / Vercel KV REST API 的最小客户端（仅用到 SET / GET / PING）。
+
+    为什么不用 upstash_redis 官方包：它内部走 httpx，在 Vercel 的 Python 运行时里
+    发请求会抛 OSError [Errno 16] Device or resource busy（导致任务状态写入失败）。
+    这里改用 requests —— 项目里 Blob 下载 / STAC 拉取本来就走 requests，运行时可用。
+    """
+
+    def __init__(self, url, token):
+        import requests
+
+        self._url = url.rstrip("/")
+        self._session = requests.Session()
+        self._session.headers.update({"Authorization": f"Bearer {token}"})
+
+    def _execute(self, *command):
+        resp = self._session.post(self._url, json=list(command), timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, dict) and data.get("error"):
+            raise RuntimeError(str(data["error"]))
+        return data.get("result") if isinstance(data, dict) else data
+
+    def set(self, key, value, ex=None):
+        command = ["SET", key, value]
+        if ex:
+            command += ["EX", int(ex)]
+        return self._execute(*command)
+
+    def get(self, key):
+        return self._execute("GET", key)
+
+    def ping(self):
+        return self._execute("PING")
+
+
 def get_redis():
     """懒加载 Redis 客户端；只要任一命名下的 URL+Token 都配置了就启用 Redis 模式。"""
     global _redis_client, _redis_error, _use_redis
@@ -132,8 +168,7 @@ def get_redis():
         token = next((os.environ.get(k, "").strip() for k in _REDIS_TOKEN_ENVS if os.environ.get(k, "").strip()), "")
         if url and token:
             try:
-                from upstash_redis import Redis
-                _redis_client = Redis(url=url, token=token, allow_telemetry=False)
+                _redis_client = _RestRedis(url, token)
                 _use_redis = True
             except Exception as exc:  # noqa: BLE001
                 _redis_error = f"{type(exc).__name__}: {exc}"
@@ -158,7 +193,10 @@ def _save_job(job):
             r.set(_job_key(job["job_id"]), json.dumps(job, ensure_ascii=False), ex=JOB_TTL)
             return True
         except Exception as exc:  # noqa: BLE001
+            import traceback
+
             print(f"[storage] Redis 写入失败: {exc}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
             return False
     JOBS[job["job_id"]] = job
     return True
@@ -440,8 +478,12 @@ def static_file(name: str):
 
 
 @app.get("/api/diag")
-def diag():
-    """诊断端点：不加载任何重型依赖，用于排查线上函数启动/存储配置问题"""
+def diag(selftest: int = 0):
+    """诊断端点：不加载任何重型依赖，用于排查线上函数启动/存储配置问题。
+
+    加 ?selftest=1 会真的对 Redis 做一次 SET/GET 往返（自检 key 60s 过期），
+    结果写入响应和运行日志（失败时打印完整 traceback），用于定位线上读写问题。
+    """
     get_redis()  # 触发一次 Redis 初始化探测
     if _use_redis and _blob_enabled():
         storage_mode = "redis+blob"
@@ -451,7 +493,7 @@ def diag():
         storage_mode = "blob-only"
     else:
         storage_mode = "local-memory"
-    return {
+    result = {
         "ok": _engine is not None,
         "engine_error": _engine_error,
         "note": "重型依赖（numpy/rasterio 等）在首次任务请求时才加载，本端点不加载它们",
@@ -474,6 +516,22 @@ def diag():
             ),
         },
     }
+    if selftest:
+        r = get_redis()
+        try:
+            if r is None:
+                raise RuntimeError(f"Redis 未启用：{_redis_error}")
+            r.set("lulc:selftest", "ok", ex=60)
+            roundtrip = r.get("lulc:selftest")
+            info = {"ok": True, "roundtrip": roundtrip}
+        except Exception as exc:  # noqa: BLE001
+            import traceback
+
+            traceback.print_exc(file=sys.stderr)
+            info = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        print(f"[diag] redis selftest: {info}", file=sys.stderr)
+        result["selftest"] = info
+    return result
 
 
 @app.get("/api/meta")
