@@ -13,17 +13,17 @@
 
   <header class="app-header">
     <div class="brand">
-      <span class="brand-logo">🌍</span>
+      <span class="brand-logo" aria-hidden="true">🌿</span>
       <div class="brand-text">
         <h1>LandScape</h1>
-        <span class="brand-sub">土地覆盖变化检测 · Powered by Planetary Computer</span>
+        <span class="brand-sub">轻量级土地覆盖变化检测</span>
       </div>
     </div>
     <div class="header-actions">
-      <span class="badge">数据 2017–2022 · 10m</span>
-      <a class="github-link" href="https://github.com/" target="_blank" rel="noopener">
+      <span class="badge">全球年度数据 · 10m</span>
+      <a class="github-link" href="https://github.com/xiaoman0517/lulc-shift" target="_blank" rel="noopener noreferrer">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-        GitHub
+        项目源码
       </a>
     </div>
   </header>
@@ -32,14 +32,33 @@
     <!-- 左侧控制面板 -->
     <aside class="sidebar">
 
+      <section class="intro-card" aria-labelledby="intro-title">
+        <div class="intro-kicker"><span class="status-dot"></span>低成本 · 快速 · 可复现</div>
+        <h2 id="intro-title">两期影像，读懂地表变化</h2>
+        <p>复用微软行星计算机上的全球年度土地覆盖分类产品。命令行脚本可按区域下载两个年份的数据，再逐像素比较类别标签，定位地物类型发生转变的区域；本页面提供同一工作流的可视化体验。</p>
+        <ol class="workflow-steps" aria-label="工作流程">
+          <li><span>01</span>选区域与年份</li>
+          <li><span>02</span>获取年度分类</li>
+          <li><span>03</span>逐像素对比</li>
+        </ol>
+        <div class="intro-links">
+          <a href="https://planetarycomputer.microsoft.com/dataset/io-lulc-9-class" target="_blank" rel="noopener noreferrer">了解数据集 <span aria-hidden="true">↗</span></a>
+          <span aria-hidden="true">·</span>
+          <a href="https://github.com/xiaoman0517/lulc-shift" target="_blank" rel="noopener noreferrer">查看开源项目 <span aria-hidden="true">↗</span></a>
+        </div>
+      </section>
+
       <section class="card" id="config-card">
         <div class="card-head">
           <span class="step">1</span>
-          <h2>参数配置</h2>
+          <div>
+            <h2>设置监测区域</h2>
+            <p class="card-caption">框选地图范围，再选择对比年份</p>
+          </div>
         </div>
 
         <div class="field-group">
-          <label>监测范围（度，WGS84）</label>
+          <label class="field-title">监测范围 <span>WGS84 · 经度 / 纬度</span></label>
           <div class="bbox-grid">
             <div class="bbox-field">
               <label for="bbox-north">北 N</label>
@@ -58,17 +77,17 @@
               <input id="bbox-east" type="text" value="114.00000" spellcheck="false" autocomplete="off" />
             </div>
           </div>
-          <p class="hint">点击左侧工具栏 ⬜ 后，依次点击两个对角点即可生成矩形，四个数值自动同步；单边不超过 0.5°（约 55km）。手动改数值失焦后矩形也会自动更新。</p>
+          <p class="hint">在地图上点击两个对角点绘制矩形，或直接编辑坐标；单边范围不超过 0.5°（约 55 km）。</p>
         </div>
 
         <div class="field-group years-row">
           <div class="year-field">
-            <label for="year-before">变化前</label>
+            <label for="year-before">起始年份</label>
             <select id="year-before"></select>
           </div>
-          <div class="arrow">→</div>
+          <div class="arrow" aria-hidden="true">→</div>
           <div class="year-field">
-            <label for="year-after">变化后</label>
+            <label for="year-after">结束年份</label>
             <select id="year-after"></select>
           </div>
         </div>
@@ -139,7 +158,8 @@
       </section>
 
       <footer class="side-footer">
-        <span>开源 · MIT · 数据 © Microsoft Planetary Computer</span>
+        <span>开源 · MIT</span><span class="footer-divider">·</span>
+        <a href="https://planetarycomputer.microsoft.com/" target="_blank" rel="noopener noreferrer">数据 © Microsoft Planetary Computer</a>
       </footer>
     </aside>
 
