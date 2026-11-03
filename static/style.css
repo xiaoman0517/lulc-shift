@@ -94,6 +94,7 @@ body {
 /* ---------- 项目简介 ---------- */
 .intro-card {
   position: relative; overflow: hidden;
+  flex: 0 0 auto;
   padding: 19px 18px 16px;
   border: 1px solid #d5ebe3; border-radius: var(--radius);
   background:
@@ -339,13 +340,19 @@ tbody tr:hover { background: #f6fbfa; }
 }
 
 @media (max-width: 520px) {
-  .app-header { padding: 10px 14px; }
-  .brand { gap: 9px; }
-  .brand-logo { width: 36px; height: 36px; }
-  .brand-text h1 { font-size: 17px; }
-  .github-link { padding: 7px 10px; font-size: 11.5px; }
+  .app-header { padding: 10px 12px; gap: 8px; }
+  .brand { min-width: 0; gap: 7px; }
+  .brand-logo { width: 34px; height: 34px; flex: none; font-size: 19px; }
+  .brand-text { min-width: 0; }
+  .brand-text h1 { font-size: 15px; letter-spacing: 0; white-space: nowrap; }
+  .github-link { flex: none; padding: 7px 9px; font-size: 10.5px; }
   .intro-card { padding: 16px 15px 14px; }
   .intro-card h2 { font-size: 17px; }
   .card { padding: 15px; }
   .sidebar { max-height: 52vh; }
+}
+
+@media (max-width: 360px) {
+  .brand-text h1 { font-size: 13px; }
+  .github-link { padding: 6px 7px; font-size: 10px; }
 }
